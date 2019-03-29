@@ -2,10 +2,12 @@ param
 (
 	$OutPutFile = (join-path (pwd) ($env:USERDNSDOMAIN+"_attribute_flow.html")),
 	[switch]$Debug
-	
 )
+write-progress -id 1 -activity "Create html file" -status "Initialize" -percentComplete 0
 
 Add-Type -AssemblyName System.Web
+Add-Type -Path "C:\Program Files\Microsoft Forefront Identity Manager\2010\Synchronization Service\UIShell\PropertySheetBase.dll"
+$MMSWebService = (new-object Microsoft.DirectoryServices.MetadirectoryServices.UI.WebServices.MMSWebService)
 
 function Format-XML-HTML([xml]$xml)
 { 
@@ -19,15 +21,6 @@ function Format-XML-HTML([xml]$xml)
     return [Web.HttpUtility]::HtmlEncode($StringWriter.ToString()).Replace("`r`n","</br>").Replace(" ","&nbsp;")
 }
 
-#$PortalParameters = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Forefront Identity Manager\2010\Portal"
-$SynchronizationServiceParameters = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\services\FIMSynchronizationService\Parameters
-
-
-#$PortalUrl = $PortalParameters.BaseSiteCollectionURL;
-$SQLServerInstans = ("localhost",$SynchronizationServiceParameters.Server)[$SynchronizationServiceParameters.Server.Length -gt 0]+("","\")[$SynchronizationServiceParameters.SQLInstance.Length -gt 0]+("",$SynchronizationServiceParameters.SQLInstance)[$SynchronizationServiceParameters.SQLInstance.Length -gt 0]
-$DBName = $SynchronizationServiceParameters.DBName
-
-$ConnectionString = "Data Source=$SQLServerInstans;Initial Catalog=$DBName;Integrated Security=SSPI;"
 $CurentDir = (pwd)
 
 $OIDTabel = 
@@ -39,123 +32,85 @@ $OIDTabel =
 	"1.3.6.1.4.1.1466.115.121.1.27" = "Integer";
 }
 
-#Connection
-$Connection = New-Object System.Data.SqlClient.SqlConnection ($ConnectionString)
-$Connection.Open()
-
-if($Connection.State -eq "Closed"){
-	write-host -ForegroundColor Blue -BackgroundColor Yellow "Error connecting to SQL"
-	write-host -ForegroundColor Blue -BackgroundColor Yellow $SQLServerInstans
-	write-host -ForegroundColor Blue -BackgroundColor Yellow $DBName
-	exit
-}
-
-
-#MV schema and import
-$SQLstring = "select mv_schema_xml,import_attribute_flow_xml from mms_server_configuration"
-$SqlCmd = New-Object System.Data.SqlClient.SqlCommand($SQLstring,$Connection)
-$SqlCmd.CommandTimeout = $Connection.ConnectionTimeout
-
-$reader = $SqlCmd.ExecuteReader()
-while ($reader.Read())
-{
-	[xml]$mv_schema_xml = $reader["mv_schema_xml"]
-	if($Debug){ $mv_schema_xml.Save((Join-Path $CurentDir "mv_schema_xml.xml")) }
-	
-	[xml]$import_attribute_flow_xml = $reader["import_attribute_flow_xml"]
-	if($Debug){ $import_attribute_flow_xml.Save((Join-Path $CurentDir "import_attribute_flow_xml.xml")) }
-}
-
-$reader.Close()
-$SqlCmd.Dispose()
-
+write-progress -id 1 -activity "Create html file" -status "Loading SynchronizationRules" -percentComplete 5
 
 #MV SynchronizationRules
 $SynchronizationRules = New-Object hashtable
 $SynchronizationRulesvalue = New-Object hashtable 
 
-$SQLstring = "select mv.*"
-$SQLstring += ",STUFF((`
-			select CAST('|' + RTRIM(mvm.string_value_not_indexable) AS VARCHAR(MAX))`
-			from mms_metaverse_multivalue mvm`
-			where mv.object_id = mvm.object_id`
-			and mvm.attribute_name = 'persistentFlow'`
-			FOR XML PATH (''))`
-			, 1, 1, ''`
-) as persistentFlow "
-$SQLstring += "from mms_metaverse mv where object_type = 'synchronizationRule'"
-
-$SqlCmd = New-Object System.Data.SqlClient.SqlCommand($SQLstring,$Connection)
-$SqlCmd.CommandTimeout = $Connection.ConnectionTimeout
-
-$synchronizationRuleTable = New-Object system.Data.DataTable "synchronizationRule"
-$Adapter = New-Object System.Data.SqlClient.SqlDataAdapter $SqlCmd
-$RowCount = $Adapter.Fill($synchronizationRuleTable)
-$Adapter.Dispose()
-$SqlCmd.Dispose()
+[xml]$synchronizationRuleXml = $MMSWebService.SearchMV("<mv-filter collation-order=`"Latin1_General_CI_AS`"><mv-object-type>synchronizationRule</mv-object-type></mv-filter>")
 
 if($Debug){
-	$synchronizationRuleTable.WriteXml((Join-Path $CurentDir "synchronizationRuleTable.xml"))
+	$synchronizationRuleXml.Save((join-path $CurentDir "synchronizationRule.xml"))
 }
 
-foreach($row in $synchronizationRuleTable.Rows){
-	[void]$SynchronizationRules.Add("{"+$row["object_id"].ToString().ToUpper()+"}",$row["displayname"])
+$TotalStep = $synchronizationRuleXml.'mv-objects'.'mv-object'.entry.Length
+$StegCount = 0
+foreach($entry in $synchronizationRuleXml.'mv-objects'.'mv-object'.entry){
+	write-progress -id 2 -activity "SynchronizationRules" -status ($entry.attr[$index].value.'#text') -percentComplete ($StegCount/$TotalStep*100)
+	
+	$index = ($entry.attr.name).IndexOf("displayName")
+	[void]$SynchronizationRules.Add($entry.dn.ToUpper(),$entry.attr[$index].value.'#text')
+	
+	$StegCount++
 }
 
-# mms_management_agent
-$SQLstring = "select * from mms_management_agent"
-$SqlCmd = New-Object System.Data.SqlClient.SqlCommand($SQLstring,$Connection)
-$SqlCmd.CommandTimeout = $Connection.ConnectionTimeout
+write-progress -id 1 -activity "Create html file" -status "Loading MV data" -percentComplete 10
+
+$MVdata = ([xml]$MMSWebService.GetMVData([uint32]::MaxValue)).'mv-data'
+
+if($Debug){
+	$MVXMLdata.Save((join-path $CurentDir "MV.xml"))
+}
+
+$maGuid = $null
+$maName = $null
+$MMSWebService.GetMAGuidList([ref] $maGuid,[ref] $maName)
 
 $attribute_exportMA = New-Object 'system.collections.generic.dictionary[string,System.Collections.Generic.HashSet[string]]'
 $agentList = New-Object 'system.collections.generic.dictionary[string,string]'
-
 $ListMA = New-Object System.Text.StringBuilder
 $MaOut = New-Object System.Text.StringBuilder
+
 [void]$MaOut.Append("<h1>Management agent</h1>`r`n")
 [void]$ListMA.AppendFormat("<h1>{0}</h1></br>Generated {1}</br><h2>Management agent List</h2>`r`n", ($env:USERDNSDOMAIN),(get-date).ToString("yyy-MM-dd HH:mm:ss"))
 
-$reader = $SqlCmd.ExecuteReader()
-while ($reader.Read())
-{
-	$ma_guid           = $reader["ma_id"].ToString().ToUpper()
-	$ma_name           = $reader["ma_name"]
-	$ma_type           = $reader["ma_type"]
-	$capabilities_mask = $reader["capabilities_mask"]
-	$ma_export_type    = $reader["ma_export_type"]
-	$ma_description    = $reader["ma_description"]
+write-progress -id 1 -activity "Create html file" -status "Loading MA data" -percentComplete 20
+for($i=0;$i -lt $maGuid.Count;$i++){
+	write-progress -id 2 -activity "Management Agent" -status ($maName[$i]) -percentComplete ($i/$maGuid.Count*100)
+
+	$MAdata = ([xml]$MMSWebService.GetMaData($maGuid[$i],[uint32]::MaxValue,[uint32]::MaxValue,[uint32]::MaxValue)).'ma-data'
+
+	$ma_guid           = $maGuid[$i].ToUpper()
+	$ma_name           = $maName[$i]
+	$ma_type           = $MAdata.category
+	$subtype           = $MAdata.subtype
+	$capabilities_mask = $MAdata.'capabilities-mask'
+	$ma_export_type    = $madata.'export-type'
+	$ma_description    = $madata.description
 	
-	[void]$agentList.Add("{$ma_guid}",$ma_name)
+	if($Debug){
+		$maXmlData.Save((join-path $CurentDir "$ma_name.xml"))
+	}
+	
+	[void]$agentList.Add("$ma_guid",$ma_name)
 	[void]$ListMA.AppendFormat("<a href='#{0}'>{0}</a></br>",$ma_name)
 
-	try{[xml]$attribute_inclusion_xml    	= $reader["attribute_inclusion_xml"];if($Debug){ $attribute_inclusion_xml.Save((Join-Path $CurentDir "attribute_inclusion_xml.$ma_name .xml")) }         } catch{}
-	try{[xml]$component_mappings_xml    	= $reader["component_mappings_xml"];if($Debug){ $component_mappings_xml.Save((Join-Path $CurentDir "component_mappings_xml.$ma_name .xml")) }          } catch{}
-	try{[xml]$controller_configuration_xml 	= $reader["controller_configuration_xml"];if($Debug){ $controller_configuration_xml.Save((Join-Path $CurentDir "controller_configuration_xml.$ma_name .xml")) }    } catch{}
-	try{[xml]$dn_construction_xml    		= $reader["dn_construction_xml"];if($Debug){ $dn_construction_xml.Save((Join-Path $CurentDir "dn_construction_xml.$ma_name .xml")) }             } catch{}
-	try{[xml]$export_attribute_flow_xml   	= $reader["export_attribute_flow_xml"];if($Debug){ $export_attribute_flow_xml.Save((Join-Path $CurentDir "export_attribute_flow_xml.$ma_name .xml")) }       } catch{}
-	try{[xml]$join_rule_xml    				= $reader["join_rule_xml"];if($Debug){ $join_rule_xml.Save((Join-Path $CurentDir "join_rule_xml.$ma_name .xml")) }                   } catch{}
-	try{[xml]$ma_extension_xml    			= $reader["ma_extension_xml"];if($Debug){ $ma_extension_xml.Save((Join-Path $CurentDir "ma_extension_xml.$ma_name .xml")) }                } catch{}
-	try{[xml]$passwordsync_xml    			= $reader["passwordsync_xml"];if($Debug){ $passwordsync_xml.Save((Join-Path $CurentDir "passwordsync_xml.$ma_name .xml")) }                } catch{}
-	try{[xml]$private_configuration_xml    	= $reader["private_configuration_xml"];if($Debug){ $private_configuration_xml.Save((Join-Path $CurentDir "private_configuration_xml.$ma_name .xml")) }       } catch{}
-	try{[xml]$projection_rule_xml    		= $reader["projection_rule_xml"];if($Debug){ $projection_rule_xml.Save((Join-Path $CurentDir "projection_rule_xml.$ma_name .xml")) }             } catch{}
-	try{[xml]$provisioning_cleanup_xml   	= $reader["provisioning_cleanup_xml"];if($Debug){ $provisioning_cleanup_xml.Save((Join-Path $CurentDir "provisioning_cleanup_xml.$ma_name .xml")) }        } catch{}
-	try{[xml]$stay_disconnector_xml    		= $reader["stay_disconnector_xml"];if($Debug){ $stay_disconnector_xml.Save((Join-Path $CurentDir "stay_disconnector_xml.$ma_name .xml")) }           } catch{}
-	try{[xml]$ui_settings_xml    			= $reader["ui_settings_xml"];if($Debug){ $ui_settings_xml.Save((Join-Path $CurentDir "ui_settings_xml.$ma_name .xml")) }                 } catch{}
+	[void]$MaOut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr><tr><td>Type:{1}</td><td>Capabilities:{2}</td><td>export_type:{3}</td><td>Description:{4}</td><td>GUID:{5}</td></tr>`r`n", 
+	$ma_name,$ma_type,$capabilities_mask,$ma_export_type,$ma_description,$ma_guid)
+	
+	$assemblyname = $MAdata.'private-configuration'.MAConfig.'extension-config'.filename.'#text'
+	if(-not $assemblyname){$assemblyname=""}
 
-	[void]$MaOut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr><tr><td>Type:{1}</td><td>Capabilities:{2}</td><td>export_type:{3}</td><td>Description:{4}</td><td>GUID:{5}</td></tr>`r`n", $ma_name,$ma_type,$capabilities_mask,$ma_export_type,$ma_description,$ma_guid)
-	$assemblyname = ""
-	if($ma_extension_xml.extension.'assembly-name'){
-		$assemblyname = $ma_extension_xml.extension.'assembly-name'
-	}
 	[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td></tr>`r`n", $assemblyname)
 	[void]$MaOut.Append("<tr></tr>`r`n")
 	[void]$MaOut.AppendFormat("<tr><th>Type</th><th>CS</th><th>import/export</th><th>MV</th><th>Rule(s)</th></tr>")
 	
 	#Join object cs - attibute - mv - extension rule name
 	$OldjoinName = ""
-	if($join_rule_xml)
+	if($MAdata.join)
 	{
-		foreach($profile in $join_rule_xml.join.'join-profile'){
+		foreach($profile in $MAdata.join.'join-profile'){
 			$count=1
 			foreach($join in $profile.'join-criterion'){
 				$mvobject = $join.search.'mv-object-type'
@@ -165,7 +120,7 @@ while ($reader.Read())
 				$OldjoinName = $joinName
 				
 				$scriptcontext = ""
-				if($join.search.'attribute-mapping'.'direct-mapping'){
+				if($join.search.'attribute-mapping'.'direct-mapping' -ne $null){
 					if($join.search.'attribute-mapping'.'direct-mapping'.'src-attribute'.'#text'){
 						$css = [string]::Join(",",$join.search.'attribute-mapping'.'direct-mapping'.'src-attribute'.'#text')
 					}else{
@@ -192,36 +147,36 @@ while ($reader.Read())
 	[void]$MaOut.Append("<tr></tr>`r`n")
 	
 	#Projektion object cs - attibute - mv - extension rule name
-	if($projection_rule_xml){
-		if($projection_rule_xml.projection.'class-mapping'.type){
-			if($projection_rule_xml.projection.'class-mapping'.type -eq "sync-rule"){
-				$SyncRuleID = ($projection_rule_xml.projection.'class-mapping'.'sync-rule-id').ToString().ToUpper()
+	if($MAdata.projection){
+		if($MAdata.projection.'class-mapping'.type){
+			if($MAdata.projection.'class-mapping'.type -eq "sync-rule"){
+				$SyncRuleID = ($MAdata.projection.'class-mapping'.'sync-rule-id').ToString().ToUpper()
 				$SyncRuleName = $SynchronizationRules[$SyncRuleID]
 				$Type = "sync-rule(<a href='#{0}'>{1}</a>)" -f $SyncRuleID,$SyncRuleName
 			}else{
-				$Type = $projection_rule_xml.projection.'class-mapping'.type
+				$Type = $MAdata.projection.'class-mapping'.type
 			}
 			[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $Type)
 		}
-		if($projection_rule_xml.projection.'class-mapping'.'cd-object-type'){
-			[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $projection_rule_xml.projection.'class-mapping'.'cd-object-type')
+		if($MAdata.projection.'class-mapping'.'cd-object-type'){
+			[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $MAdata.projection.'class-mapping'.'cd-object-type')
 		}
-		if($projection_rule_xml.projection.'class-mapping'.'mv-object-type'){
-			[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $projection_rule_xml.projection.'class-mapping'.'mv-object-type')
+		if($MAdata.projection.'class-mapping'.'mv-object-type'){
+			[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $MAdata.projection.'class-mapping'.'mv-object-type')
 		}
 		[void]$MaOut.Append("<tr></tr>`r`n")
 	}
 	
 	# DN = dn-construction.attribute
-	if($dn_construction_xml){
+	#if($dn_construction_xml){
 		#[void]$MaOut.Append()
 		#[void]$MaOut.Append("`r`n")
-	}
+	#}
 	
 	#Flow Rules
 	$Objectflow = New-Object 'system.collections.generic.dictionary[string,System.Collections.Generic.HashSet[string]]'
 	#Import
-	foreach($flow in $import_attribute_flow_xml.SelectNodes("/import-attribute-flow/import-flow-set/import-flows/import-flow[@src-ma='{$ma_guid}']")){
+	foreach($flow in $MVdata.SelectNodes("/mv-data/import-attribute-flow/import-flow-set/import-flows/import-flow[@src-ma='$ma_guid']")){
 		$rulename = ""
 		
 		$flowName = "<tr><td>Flow object</td><td>{0}</td><td><-></td><td>{1}</td></tr>`r`n" -f $flow.'cd-object-type',$flow.ParentNode.ParentNode.'mv-object-type'
@@ -295,109 +250,108 @@ while ($reader.Read())
 	
 	#Export
 	#Attibute flow cs - mv - extension rule name 	export_attribute_flow_xml
-	if($export_attribute_flow_xml){
-		if($export_attribute_flow_xml.'export-attribute-flow'){
-			foreach($flowset in $export_attribute_flow_xml.'export-attribute-flow'.'export-flow-set'){
+	if($MAdata.'export-attribute-flow'){
+		foreach($flowset in $MAdata.'export-attribute-flow'.'export-flow-set'){
 
-				$flowName = "<tr><td>Flow object</td><td>{0}</td><td><-></td><td>{1}</td></tr>`r`n" -f $flowset.'cd-object-type',$flowset.'mv-object-type'
+			$flowName = "<tr><td>Flow object</td><td>{0}</td><td><-></td><td>{1}</td></tr>`r`n" -f $flowset.'cd-object-type',$flowset.'mv-object-type'
+			
+			foreach($flow in $flowset.'export-flow'){
+				$rulename = ""
+				$srcattributes=""
+				$attlist=New-Object System.Collections.Generic.HashSet[string]
 				
-				foreach($flow in $flowset.'export-flow'){
-					$rulename = ""
-					$srcattributes=""
-					$attlist=New-Object System.Collections.Generic.HashSet[string]
-					
-					if($flow.'scripted-mapping'.'src-attribute'){
-						$rulename = $flow.'scripted-mapping'.'script-context'
-						$list=New-Object System.Collections.Generic.HashSet[string]
+				if($flow.'scripted-mapping'.'src-attribute'){
+					$rulename = $flow.'scripted-mapping'.'script-context'
+					$list=New-Object System.Collections.Generic.HashSet[string]
 
-						$flow.'scripted-mapping'.'src-attribute' | %{
-							if($_.'#text') { 
-								[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_.'#text') 
-								[void]$attlist.Add($_.'#text') 
-								}
-							else { 
-								[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
-								[void]$attlist.Add($_) 
-								}
-						}
-						$srcattributes = [string]::Join(",",$list)
-					} elseif($flow.'direct-mapping'.'src-attribute'){
-						$rulename = $flow.'direct-mapping'.'script-context'
-						$list=New-Object System.Collections.Generic.HashSet[string]
+					$flow.'scripted-mapping'.'src-attribute' | %{
+						if($_.'#text') { 
+							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_.'#text') 
+							[void]$attlist.Add($_.'#text') 
+							}
+						else { 
+							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
+							[void]$attlist.Add($_) 
+							}
+					}
+					$srcattributes = [string]::Join(",",$list)
+				} elseif($flow.'direct-mapping'.'src-attribute'){
+					$rulename = $flow.'direct-mapping'.'script-context'
+					$list=New-Object System.Collections.Generic.HashSet[string]
 
-						$flow.'direct-mapping'.'src-attribute' | %{
-							if($_.'#text') { 
-								[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_.'#text') 
-								[void]$attlist.Add($_.'#text') 
-							}
-							else { 
-								[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
-								[void]$attlist.Add($_) 
-							}
+					$flow.'direct-mapping'.'src-attribute' | %{
+						if($_.'#text') { 
+							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_.'#text') 
+							[void]$attlist.Add($_.'#text') 
 						}
-						$srcattributes = [string]::Join(",",$list)
-					} elseif($flow.'constant-mapping'.'constant-value'){
-						$rulename = "constant"
-						$srcattributes = "'"+$flow.'constant-mapping'.'constant-value'+"'"
-					}elseif($flow.'sync-rule-mapping') {
-						
-						if($flow.'sync-rule-mapping'.'sync-rule-id'){
-							$SyncRuleID = ($flow.'sync-rule-mapping'.'sync-rule-id').ToUpper()
-							if(-NOT $SynchronizationRulesvalue.ContainsKey($SyncRuleID)){
-								$syncrulevalue = $flow.'sync-rule-mapping'.'sync-rule-value'.InnerXml
-								[void]$SynchronizationRulesvalue.Add($SyncRuleID,$syncrulevalue)
-							}
-							$SyncRuleName = $SynchronizationRules[$SyncRuleID]
-							if($SyncRuleName.Length -eq 0){
-								$SyncRuleName = $SyncRuleID
-							}
-							$rulename = "(sync-rule '<a href='#{0}'>{1}</a>'){2}" -f $SyncRuleID,$SyncRuleName,($flow.'sync-rule-mapping'.'mapping-type')
-							
-							#$SyncRuleName = $SynchronizationRules[$flow.'sync-rule-mapping'.'sync-rule-id']
-							#$rulename = "(sync-rule '$SyncRuleName')" + $flow.'sync-rule-mapping'.'mapping-type'
-						}
-						
-						$list=New-Object System.Collections.Generic.HashSet[string]
-						if($flow.'sync-rule-mapping'.'src-attribute'.Count -gt 0){
-							$flow.'sync-rule-mapping'.'src-attribute' | %{
-								[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
-								[void]$attlist.Add($_) 
-							}
-						}else{
-							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $flow.'sync-rule-mapping'.'src-attribute') 
+						else { 
+							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
 							[void]$attlist.Add($_) 
 						}
-						$srcattributes = [string]::Join(",",$list)
 					}
+					$srcattributes = [string]::Join(",",$list)
+				} elseif($flow.'constant-mapping'.'constant-value'){
+					$rulename = "constant"
+					$srcattributes = "'"+$flow.'constant-mapping'.'constant-value'+"'"
+				}elseif($flow.'sync-rule-mapping') {
+					
+					if($flow.'sync-rule-mapping'.'sync-rule-id'){
+						$SyncRuleID = ($flow.'sync-rule-mapping'.'sync-rule-id').ToUpper()
+						if(-NOT $SynchronizationRulesvalue.ContainsKey($SyncRuleID)){
+							$syncrulevalue = $flow.'sync-rule-mapping'.'sync-rule-value'.InnerXml
+							[void]$SynchronizationRulesvalue.Add($SyncRuleID,$syncrulevalue)
+						}
+						$SyncRuleName = $SynchronizationRules[$SyncRuleID]
+						if($SyncRuleName.Length -eq 0){
+							$SyncRuleName = $SyncRuleID
+						}
+						$rulename = "(sync-rule '<a href='#{0}'>{1}</a>'){2}" -f $SyncRuleID,$SyncRuleName,($flow.'sync-rule-mapping'.'mapping-type')
+						
+						#$SyncRuleName = $SynchronizationRules[$flow.'sync-rule-mapping'.'sync-rule-id']
+						#$rulename = "(sync-rule '$SyncRuleName')" + $flow.'sync-rule-mapping'.'mapping-type'
+					}
+					
+					$list=New-Object System.Collections.Generic.HashSet[string]
+					if($flow.'sync-rule-mapping'.'src-attribute'.Count -gt 0){
+						$flow.'sync-rule-mapping'.'src-attribute' | %{
+							[void]$list.Add("<a href='#{0}'>{0}</a>" -f $_) 
+							[void]$attlist.Add($_) 
+						}
+					}else{
+						[void]$list.Add("<a href='#{0}'>{0}</a>" -f $flow.'sync-rule-mapping'.'src-attribute') 
+						[void]$attlist.Add($_) 
+					}
+					$srcattributes = [string]::Join(",",$list)
+				}
 
-					if($flow.'suppress-deletions' -eq "false"){ $AllowNull = ",Allow null" } else { $AllowNull="" }
-					$CSatt = $flow.'cd-attribute'
-					$flowRule = "<tr><td></td><td>{0}</td><td><-</td><td>{1}</td><td>{2}{3}</td></tr>`r`n" -f $CSatt,$srcattributes,$rulename,$AllowNull
-					
-					foreach($MvAtt in $attlist){
-						$MVstring = "<tr><td></td><td>-></td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>`r`n" -f $ma_name,$CSatt
-						if($attribute_exportMA.ContainsKey($MvAtt)){
-							[void]$attribute_exportMA[$MvAtt].Add($MVstring)
-						}
-						else{
-							$objl=New-Object System.Collections.Generic.HashSet[string]
-							[void]$objl.Add($MVstring)
-							[void]$attribute_exportMA.Add($MvAtt,$objl)
-						}
-					}
-					
-					if($Objectflow.ContainsKey($flowName)){
-						[void]$Objectflow[$flowName].Add($flowRule)
+				if($flow.'suppress-deletions' -eq "false"){ $AllowNull = ",Allow null" } else { $AllowNull="" }
+				$CSatt = $flow.'cd-attribute'
+				$flowRule = "<tr><td></td><td>{0}</td><td><-</td><td>{1}</td><td>{2}{3}</td></tr>`r`n" -f $CSatt,$srcattributes,$rulename,$AllowNull
+				
+				foreach($MvAtt in $attlist){
+					$MVstring = "<tr><td></td><td>-></td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>`r`n" -f $ma_name,$CSatt
+					if($attribute_exportMA.ContainsKey($MvAtt)){
+						[void]$attribute_exportMA[$MvAtt].Add($MVstring)
 					}
 					else{
-						$flowRuleList=New-Object System.Collections.Generic.HashSet[string]
-						[void]$flowRuleList.Add($flowRule)
-						[void]$Objectflow.Add($flowName,$flowRuleList)
+						$objl=New-Object System.Collections.Generic.HashSet[string]
+						[void]$objl.Add($MVstring)
+						[void]$attribute_exportMA.Add($MvAtt,$objl)
 					}
+				}
+				
+				if($Objectflow.ContainsKey($flowName)){
+					[void]$Objectflow[$flowName].Add($flowRule)
+				}
+				else{
+					$flowRuleList=New-Object System.Collections.Generic.HashSet[string]
+					[void]$flowRuleList.Add($flowRule)
+					[void]$Objectflow.Add($flowName,$flowRuleList)
 				}
 			}
 		}
 	}
+	
 	foreach($key in $Objectflow.Keys){
 		[void]$MaOut.AppendFormat("<tr><td>{0}</td></tr>",$key)
 		[void]$MaOut.Append([string]::Join("",$Objectflow[$key]))
@@ -408,50 +362,37 @@ while ($reader.Read())
 	#Provisionering object cs ? in 
 	
 	#Deprovisionering object cs
-	if($provisioning_cleanup_xml){
-		[void]$MaOut.AppendFormat("<tr><td>Deprovisionering:{0}</td></tr><tr><td>enable-recall:{1}</td></tr>`r`n", $provisioning_cleanup_xml.'provisioning-cleanup'.action, $import_attribute_flow_xml.SelectSingleNode("/import-attribute-flow/per-ma-options/ma-options[@ma-id='{$ma_guid}']").'enable-recall')
+	if($MAdata){
+		[void]$MaOut.AppendFormat("<tr><td>Deprovisionering:{0}</td></tr><tr><td>enable-recall:{1}</td></tr>`r`n", $MAdata.'provisioning-cleanup'.action, $MVdata.SelectSingleNode("/import-attribute-flow/per-ma-options/ma-options[@ma-id='{$ma_guid}']").'enable-recall')
 	}
 	#CS full list
 	#CS - object - type?
 	#CS - attibutes - type 
 	[void]$MaOut.Append("<tr></tr>`r`n")
-	if($attribute_inclusion_xml){
+	if($MAdata.'attribute-inclusion'){
 		[void]$MaOut.AppendFormat("<tr><th>CS attribute</th></tr>")
-		foreach($attribute in $attribute_inclusion_xml.'attribute-inclusion'.'attribute'){
+		foreach($attribute in $MAdata.'attribute-inclusion'.'attribute'){
 			[void]$MaOut.AppendFormat("<tr><td>{0}</td></tr>",$attribute)
 		}
 	}
 	
 	[void]$MaOut.Append("</table></br></br>`r`n")
-	
-	$attribute_inclusion_xml    	= $null
-	$component_mappings_xml    		= $null
-	$controller_configuration_xml 	= $null
-	$dn_construction_xml    		= $null
-	$export_attribute_flow_xml   	= $null
-	$join_rule_xml    				= $null
-	$ma_extension_xml    			= $null
-	$passwordsync_xml    			= $null
-	$private_configuration_xml    	= $null
-	$projection_rule_xml    		= $null
-	$provisioning_cleanup_xml   	= $null
-	$stay_disconnector_xml    		= $null
-	$ui_settings_xml    			= $null
 }
-$reader.Close()
-$SqlCmd.Dispose()
-$Connection.Close()
-
 
 $schemaOut = New-Object System.Text.StringBuilder
 [void]$schemaOut.Append("<h1>MV attribute</h1>`r`n")
 
-foreach($attribute in $mv_schema_xml.dsml.'directory-schema'.'attribute-type'){
+write-progress -id 1 -activity "Create html file" -status "Processing MV data" -percentComplete 40
+$TotalStep = $MVdata.schema.dsml.'directory-schema'.'attribute-type'.Length
+$StegCount = 0
+foreach($attribute in $MVdata.schema.dsml.'directory-schema'.'attribute-type'){
+	write-progress -id 2 -activity "Processing attribute" -status ($attribute.Name) -percentComplete ($StegCount/$TotalStep*100)
 	[void]$schemaOut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td><td></td></tr><tr><td>mulitvalue:{1}</td><td>indexed:{2}</td><td>syntax:{3}</td></tr>`r`n", $attribute.Name,!($attribute.'single-value'), ([Boolean]$attribute.indexed),$OIDTabel[$attribute.syntax])
 	
 	$ma=New-Object System.Collections.Generic.HashSet[string]
 	$aname = $attribute.Name
-	$flowss = $import_attribute_flow_xml.SelectNodes("/import-attribute-flow/import-flow-set/import-flows[@mv-attribute='$aname']")
+	$flowss = $MVdata.SelectNodes("/mv-data/import-attribute-flow/import-flow-set/import-flows[@mv-attribute='$aname']")
+	
 	if($flowss){
 		[void]$schemaOut.Append("`r`n")
 		foreach($flows in $flowss){
@@ -465,7 +406,7 @@ foreach($attribute in $mv_schema_xml.dsml.'directory-schema'.'attribute-type'){
 				$srcattributes=""
 				if($flow.'scripted-mapping'.'src-attribute'){
 					$rulename = $flow.'scripted-mapping'.'script-context'
-					$list=New-Object System.Collections.Generic.HashSet[string]
+					$list = New-Object System.Collections.Generic.HashSet[string]
 
 					$flow.'scripted-mapping'.'src-attribute' | %{
 					if($_.'#text') { [void]$list.Add($_.'#text') }
@@ -474,7 +415,7 @@ foreach($attribute in $mv_schema_xml.dsml.'directory-schema'.'attribute-type'){
 					$srcattributes = [string]::Join(",",$list)
 				} elseif($flow.'direct-mapping'.'src-attribute'){
 					$rulename = $flow.'direct-mapping'.'script-context'
-					$list=New-Object System.Collections.Generic.HashSet[string]
+					$list = New-Object System.Collections.Generic.HashSet[string]
 
 					$flow.'direct-mapping'.'src-attribute' | %{
 					if($_.'#text') { [void]$list.Add($_.'#text') }
@@ -499,44 +440,43 @@ foreach($attribute in $mv_schema_xml.dsml.'directory-schema'.'attribute-type'){
 	}
 
 	[void]$schemaOut.Append("</table></br>`r`n")
+	$StegCount++
 }
 
 $SROut = New-Object System.Text.StringBuilder
 [void]$SROut.Append("<h1>Synchronization rules</h1>")
-$ColumnNames = $synchronizationRuleTable.Columns.ColumnName
-foreach($row in $synchronizationRuleTable.Rows){
-	[void]$SROut.AppendFormat("<table id='{{{0}}}'><tr><td><h1>{1}</h1></td></tr>", $row["object_id"].Tostring().ToUpper(), $row["displayname"])
-	foreach($name in $ColumnNames){
-		if($name -eq "persistentFlow"){
-			if($row[$name] -ne [DBNull]::Value){
-				foreach($Value in $row[$name].ToString().Split("|")){
-					if($Value -is [string] -AND $Value.StartsWith("&lt;")){
-						$Value = "</br>" + (Format-XML-HTML ([Web.HttpUtility]::HtmlDecode($Value)))
-					}
-					[void]$SROut.AppendFormat("<tr><td>{0}: {1}</td></tr>",$name,$Value)
-				}
-			}
-		}elseif($name -ne "displayname"){
-			if($row[$name] -ne [DBNull]::Value){
-				$Value = $row[$name]
+
+write-progress -id 1 -activity "Create html file" -status "Processing synchronizationRule" -percentComplete 60
+$TotalStep = $synchronizationRuleXml.'mv-objects'.'mv-object'.entry.Length
+$StegCount = 0
+foreach($entry in $synchronizationRuleXml.'mv-objects'.'mv-object'.entry){
+	write-progress -id 2 -activity "Processing attribute" -status ($attribute.Name) -percentComplete ($StegCount/$TotalStep*100)
+	$index = ($entry.attr.name).IndexOf("displayName")
+	[void]$SROut.AppendFormat("<table id='{0}'><tr><td><h1>{1} - {0}</h1></td></tr>", $entry.dn.ToUpper(), ($entry.attr[$index].value.'#text'))
+	foreach($attr in $entry.attr){
+		foreach($Value in $attr.Value.'#text'){
+			if($attr.name -ne "displayname"){
 				if($Value -is [string] -AND $Value.StartsWith("<")){
 					$Value = "</br>" + (Format-XML-HTML $Value)
-				}elseif($name -eq "connectedSystem"){
+				}elseif($attr.name -eq "connectedSystem"){
 					$Value  = "<a href='#{0}'>{0}</a>" -f ($agentList[$Value])
 				}
-				[void]$SROut.AppendFormat("<tr><td>{0}: {1}</td></tr>",$name,$Value)
+				[void]$SROut.AppendFormat("<tr><td>{0}: {1}</td></tr>",$attr.name,$Value)
 			}
 		}
 	}
-	$id = "{{{0}}}" -f $row["object_id"].ToString().ToUpper()
+	$id = $entry.dn.ToUpper()
 	$Value = $SynchronizationRulesvalue[$id]
 	$SynchronizationRulesvalue.Remove($id)
 	if($Value.Length -gt 0){
 		[void]$SROut.AppendFormat("<tr><td>{0}:</br>{1}</td></tr>","sync-rule-value",(Format-XML-HTML $Value))
 	}
 	[void]$SROut.Append("</table></br>")
+	$StegCount++
 }
-#Unkown name rules (portal)
+
+write-progress -id 1 -activity "Create html file" -status "Processing unkown synchronizationRule" -percentComplete 80
+#Unkown name rules (portal?)
 foreach($Key in $SynchronizationRulesvalue.Keys){
 	[void]$SROut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr>", $Key.ToUpper())
 	[void]$SROut.AppendFormat("<tr><td>{0}: {1}</td></tr></br></br>","object_id",$Key)
@@ -544,7 +484,7 @@ foreach($Key in $SynchronizationRulesvalue.Keys){
 	[void]$SROut.Append("</table></br>")
 }
 
-
+write-progress -id 1 -activity "Create html file" -status "Write content" -percentComplete 90
 
 "<html><head><style>table{border: 1px solid black;}, th, td {}</style></head><body>" | Out-File -Encoding UTF8 -FilePath $OutPutFile
 $ListMA.ToString() | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
@@ -552,3 +492,5 @@ $schemaOut.ToString() | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 $MaOut.ToString() | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 $SROut.ToString() | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 "</body></html>`r`n" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
+
+write-progress -id 1 -activity "Create html file" -status "Done" -percentComplete 100
