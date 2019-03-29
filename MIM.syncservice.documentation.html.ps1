@@ -116,7 +116,7 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 				$mvobject = $join.search.'mv-object-type'
 				if($mvobject.Length -lt 1){$mvobject = "Any"}
 				$joinName = "{0}{1}" -f $profile.'cd-object-type', $mvobject
-				if($joinName -ne $OldjoinName) { [void]$MaOut.AppendFormat("<tr><td>Join Object</td><td>{0}</td><td><-></td><td>{1}</td></tr>",$profile.'cd-object-type',$mvobject) } 
+				if($joinName -ne $OldjoinName) { [void]$MaOut.AppendFormat("<tr><td>Join Object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>",$profile.'cd-object-type',$mvobject) } 
 				$OldjoinName = $joinName
 				
 				$scriptcontext = ""
@@ -130,7 +130,7 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 					$scriptcontext = $join.search.'attribute-mapping'.'scripted-mapping'.'script-context'
 					$css = [string]::Join(",",$join.search.'attribute-mapping'.'scripted-mapping'.'src-attribute')
 				}
-				[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td><-></td><td>",$count,$css)
+				[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td>&hArr;</td><td>",$count,$css)
 				$joinS = ""
 				$join.search.'attribute-mapping'.'mv-attribute' | % { [void]$MaOut.AppendFormat("{1}<a href='#{0}'>{0}</a>",$_,$joinS);$joinS="," }
 				[void]$MaOut.AppendFormat("</td><td>{0}</td></tr>`r`n",$scriptcontext)
@@ -179,7 +179,7 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 	foreach($flow in $MVdata.SelectNodes("/mv-data/import-attribute-flow/import-flow-set/import-flows/import-flow[@src-ma='$ma_guid']")){
 		$rulename = ""
 		
-		$flowName = "<tr><td>Flow object</td><td>{0}</td><td><-></td><td>{1}</td></tr>`r`n" -f $flow.'cd-object-type',$flow.ParentNode.ParentNode.'mv-object-type'
+		$flowName = "<tr><td>Flow object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>`r`n" -f $flow.'cd-object-type',$flow.ParentNode.ParentNode.'mv-object-type'
 		$srcattributes=""
 		if($flow.'scripted-mapping'.'src-attribute'){
 			$list=New-Object System.Collections.Generic.HashSet[string]
@@ -236,7 +236,7 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 			$srcattributes = [string]::Join(",",$list)
 		}
 
-		$flowRule = "<tr><td></td><td>{0}</td><td>-></td><td><a href='#{1}'>{1}</a></td><td>{2}</td></tr>`r`n" -f $srcattributes,$flow.ParentNode.'mv-attribute',$rulename
+		$flowRule = "<tr><td></td><td>{0}</td><td>&rArr;</td><td><a href='#{1}'>{1}</a></td><td>{2}</td></tr>`r`n" -f $srcattributes,$flow.ParentNode.'mv-attribute',$rulename
 
 		if($Objectflow.ContainsKey($flowName)){
 			[void]$Objectflow[$flowName].Add($flowRule)
@@ -253,7 +253,7 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 	if($MAdata.'export-attribute-flow'){
 		foreach($flowset in $MAdata.'export-attribute-flow'.'export-flow-set'){
 
-			$flowName = "<tr><td>Flow object</td><td>{0}</td><td><-></td><td>{1}</td></tr>`r`n" -f $flowset.'cd-object-type',$flowset.'mv-object-type'
+			$flowName = "<tr><td>Flow object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>`r`n" -f $flowset.'cd-object-type',$flowset.'mv-object-type'
 			
 			foreach($flow in $flowset.'export-flow'){
 				$rulename = ""
@@ -326,10 +326,10 @@ for($i=0;$i -lt $maGuid.Count;$i++){
 
 				if($flow.'suppress-deletions' -eq "false"){ $AllowNull = ",Allow null" } else { $AllowNull="" }
 				$CSatt = $flow.'cd-attribute'
-				$flowRule = "<tr><td></td><td>{0}</td><td><-</td><td>{1}</td><td>{2}{3}</td></tr>`r`n" -f $CSatt,$srcattributes,$rulename,$AllowNull
+				$flowRule = "<tr><td></td><td>{0}</td><td>&lArr;</td><td>{1}</td><td>{2}{3}</td></tr>`r`n" -f $CSatt,$srcattributes,$rulename,$AllowNull
 				
 				foreach($MvAtt in $attlist){
-					$MVstring = "<tr><td></td><td>-></td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>`r`n" -f $ma_name,$CSatt
+					$MVstring = "<tr><td></td><td>&rArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>`r`n" -f $ma_name,$CSatt
 					if($attribute_exportMA.ContainsKey($MvAtt)){
 						[void]$attribute_exportMA[$MvAtt].Add($MVstring)
 					}
@@ -426,7 +426,7 @@ foreach($attribute in $MVdata.schema.dsml.'directory-schema'.'attribute-type'){
 					$rulename = "constant"
 					$srcattributes = "'"+$flow.'constant-mapping'.'constant-value'+"'"
 				}
-			[void]$schemaOut.AppendFormat("<tr><td>{3}</td><td><-</td><td><a href='#{0}'>{0}</a>({1})</td><td>{2}</td></tr>`r`n",$MAname,$MA_CS_type,$srcattributes,$count)
+			[void]$schemaOut.AppendFormat("<tr><td>{3}</td><td>&lArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td>{2}</td></tr>`r`n",$MAname,$MA_CS_type,$srcattributes,$count)
 			$count++
 			}
 		}
