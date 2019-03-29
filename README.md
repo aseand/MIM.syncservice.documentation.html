@@ -1,7 +1,7 @@
 # MIM.syncservice.documentation.html
-Script to generate attribute, flow and sync rules documentation for MIM/FIM from SQL database to html file.
+Script to generate attribute, flow and sync rules documentation for MIM/FIM to html file.
 
-Require user to have read permission to FIM/MIM FIMSynchronizationService database.
+Require user to have FIMSyncAdmins 
 
 SynchronizationRules are included in html.
 
