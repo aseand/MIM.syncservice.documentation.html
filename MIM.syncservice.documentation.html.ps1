@@ -566,22 +566,31 @@ function MIM.syncservice.documentation.html {
 				switch($attr.name){
 					{ @("persistentFlow", "initialFlow") -contains $_ } {
 						
+						$initalT = ""
 						$importT = ""
 						$exportT = ""
 						foreach($Value in $attr.Value.'#text'){
 							[xml]$ValueXml = $Value
 							$temptext = (SynchronizationRule-flow-HTML $ValueXml) + "</br>"
-							if($ValueXml.'import-flow'){
-								$importT += $temptext
+							if($attr.name -eq "initialFlow"){
+								$initalT += $temptext
 							}else{
-								$exportT += $temptext
+								if($ValueXml.'import-flow'){
+									$importT += $temptext
+								}else{
+									$exportT += $temptext
+								}
 							}
 						}
-						if($importT.Length -gt 0){
-							$AttrValue = "&nbsp;&nbsp;&nbsp;&nbsp;<b>import-flow</b>:</br>" + $importT + "</br>"
-						}
-						if($exportT.Length -gt 0){
-							$AttrValue += "&nbsp;&nbsp;&nbsp;&nbsp;<b>import-flow</b>:</br>" + $exportT + "</br>"
+						if($attr.name -eq "initialFlow"){
+							$AttrValue += $initalT + "</br>"
+						}else{
+							if($importT.Length -gt 0){
+								$AttrValue = "&nbsp;&nbsp;&nbsp;&nbsp;<b>import-flow</b>:</br>" + $importT + "</br>"
+							}
+							if($exportT.Length -gt 0){
+								$AttrValue += "&nbsp;&nbsp;&nbsp;&nbsp;<b>export-flow</b>:</br>" + $exportT + "</br>"
+							}
 						}
 					}
 					"relationshipCriteria" {
