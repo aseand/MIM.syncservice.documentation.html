@@ -26,7 +26,8 @@ function Format-XML-HTML([xml]$xml)
 	$xml.WriteContentTo($XmlWriter) 
 	$XmlWriter.Flush() 
 	$StringWriter.Flush()
-	$stringout = $PasswordRex.Replace($StringWriter.ToString(),"password=`"****`"")
+	$stringout = [Web.HttpUtility]::HtmlDecode($StringWriter.ToString())
+	$stringout = $PasswordRex.Replace($stringout,"password=`"****`"")
 	return [Web.HttpUtility]::HtmlEncode($stringout).Replace("`r`n","</br>").Replace(" ","&nbsp;")
 }
 
@@ -138,7 +139,6 @@ function MIM.syncservice.documentation.html {
 	Add-Type -Path "C:\Program Files\Microsoft Forefront Identity Manager\2010\Synchronization Service\UIShell\PropertySheetBase.dll"
 	$MMSWebService = (new-object Microsoft.DirectoryServices.MetadirectoryServices.UI.WebServices.MMSWebService)
 
-
 	$CurentDir = (pwd)
 
 	write-progress -id 1 -activity "Create html file" -status "Loading SynchronizationRules" -percentComplete 5
@@ -155,6 +155,7 @@ function MIM.syncservice.documentation.html {
 
 	$TotalStep = $synchronizationRuleXml.'mv-objects'.'mv-object'.entry.Length
 	$StegCount = 0
+	
 	foreach($entry in $synchronizationRuleXml.'mv-objects'.'mv-object'.entry){
 		$index = ($entry.attr.name).IndexOf("displayName")
 		write-progress -id 2 -activity "SynchronizationRules" -status ($entry.attr[$index].value.'#text') -percentComplete ($StegCount/$TotalStep*100)
@@ -180,15 +181,7 @@ function MIM.syncservice.documentation.html {
 	$ListMA = New-Object System.Text.StringBuilder
 	$MaOut = New-Object System.Text.StringBuilder
 
-	[void]$MaOut.Append("<h1>Management agent</h1>`r`n")
-	[void]$ListMA.AppendFormat("<h1>{0}</h1></br>Generated {1}</br>", ($env:USERDNSDOMAIN),(get-date).ToString("yyy-MM-dd HH:mm:ss"))
-
-	$InstallMIMVersions = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "*Identity Manager*Service*"}|%{@{DisplayName = $_.DisplayName;Version = $_.DisplayVersion}}
-	#$InstallMIMVersions = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "*Identity Manager*"}|%{@{DisplayName = $_.DisplayName;Version = $_.DisplayVersion}}
-	#Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.displayName -like "*Identity Manager*"}|%{@{DisplayName = $_.DisplayName,Version = $_.DisplayVersion}}
-	foreach($Item in $InstallMIMVersions){
-		[void]$ListMA.AppendFormat("{0} - {1} </br>", $Item.DisplayName,$Item.Version)
-	}
+	[void]$MaOut.Append("<h1>Management agent</h1>")
 	[void]$ListMA.Append("</br><h2>Management agent List</h2>")
 
 
@@ -214,14 +207,13 @@ function MIM.syncservice.documentation.html {
 		[void]$agentList.Add("$ma_guid",$ma_name)
 		[void]$ListMA.AppendFormat("<a href='#{0}'>{0}</a></br>",$ma_name)
 
-		[void]$MaOut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr><tr><td>Type:{1}</td><td>Capabilities:{2}</td><td>export_type:{3}</td><td>Description:{4}</td><td>GUID:{5}</td></tr>`r`n", 
+		[void]$MaOut.AppendFormat("<table id='{0}'><tr><th><h1>{0}</h1></th><th></th><th></th><th></th><th></th></tr><tr><td>Type:{1}</td><td>Capabilities:{2}</td><td>export_type:{3}</td><td>Description:{4}</td><td>GUID:{5}</td></tr>", 
 		$ma_name,$ma_type,$capabilities_mask,$ma_export_type,$ma_description,$ma_guid)
 		
 		$assemblyname = $MAdata.'private-configuration'.MAConfig.'extension-config'.filename.'#text'
 		if(-not $assemblyname){$assemblyname=""}
 
-		[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td></tr>`r`n", $assemblyname)
-		[void]$MaOut.Append("<tr></tr>`r`n")
+		[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td><td></td><td></td><td></td></tr>", $assemblyname)
 		[void]$MaOut.AppendFormat("<tr><th>Type</th><th>CS</th><th>import/export</th><th>MV</th><th>Rule(s)</th></tr>")
 		
 		#Join object cs - attibute - mv - extension rule name
@@ -234,7 +226,7 @@ function MIM.syncservice.documentation.html {
 					$mvobject = $join.search.'mv-object-type'
 					if($mvobject.Length -lt 1){$mvobject = "Any"}
 					$joinName = "{0}{1}" -f $profile.'cd-object-type', $mvobject
-					if($joinName -ne $OldjoinName) { [void]$MaOut.AppendFormat("<tr><td>Join Object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>",$profile.'cd-object-type',$mvobject) } 
+					if($joinName -ne $OldjoinName) { [void]$MaOut.AppendFormat("<tr><th>Join Object</th><th>{0}</th><th>&hArr;</th><th>{1}</th><th></th></tr>",$profile.'cd-object-type',$mvobject) } 
 					$OldjoinName = $joinName
 					
 					$scriptcontext = ""
@@ -251,53 +243,52 @@ function MIM.syncservice.documentation.html {
 					[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td>&hArr;</td><td>",$count,$css)
 					$joinS = ""
 					$join.search.'attribute-mapping'.'mv-attribute' | % { [void]$MaOut.AppendFormat("{1}<a href='#{0}'>{0}</a>",$_,$joinS);$joinS="," }
-					[void]$MaOut.AppendFormat("</td><td>{0}</td></tr>`r`n",$scriptcontext)
+					[void]$MaOut.AppendFormat("</td><td>{0}</td></tr>",$scriptcontext)
 					$count++
 					foreach($resolution in $join.resolution){
 						if($resolution.'script-context'){
-							#[void]$MaOut.AppendFormat("{0}`r`n",$resolution.'script-context')
-							#[void]$MaOut.AppendFormat("{0}`r`n",$resolution.'script-context')
+							#[void]$MaOut.AppendFormat("{0}",$resolution.'script-context')
+							#[void]$MaOut.AppendFormat("{0}",$resolution.'script-context')
 						}
 					}
 				}
 			}
 		}
-		[void]$MaOut.Append("<tr></tr>`r`n")
+		[void]$MaOut.Append("<tr></tr>")
 		
 		#Projektion object cs - attibute - mv - extension rule name
+		[void]$MaOut.Append("<tr><th>Projektion</th><th></th><th></th><th></th><th></th></tr>")
 		if($MAdata.projection){
-			if($MAdata.projection.'class-mapping'.type){
-				if($MAdata.projection.'class-mapping'.type -eq "sync-rule"){
-					$SyncRuleID = ($MAdata.projection.'class-mapping'.'sync-rule-id').ToString().ToUpper()
+			foreach($classmapping in $MAdata.projection.'class-mapping'){
+				if($classmapping.type -eq "sync-rule"){
+					$SyncRuleID = ($classmapping.'sync-rule-id').ToString().ToUpper()
 					$SyncRuleName = $SynchronizationRules[$SyncRuleID]
-					$Type = "sync-rule(<a href='#{0}'>{1}</a>)" -f $SyncRuleID,$SyncRuleName
+					if($SyncRuleName -eq $null){
+						$Type = "<mark>Warning! Missing sync-rule: </mark></br>" + (Format-XML-HTML ("<sync-rule>"+$classmapping.InnerXml+"</sync-rule>"))
+					}else{
+						$Type = "sync-rule(<a href='#{0}'>{1}</a>)" -f $SyncRuleID,$SyncRuleName
+					}
 				}else{
-					$Type = $MAdata.projection.'class-mapping'.type
+					$Type = $classmapping.type
 				}
-				[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $Type)
+				[void]$MaOut.AppendFormat("<tr><td>Projektion</td><td>{0}</td><td>&hArr;</td><td>{1}</td><td>{2}</td></tr>", $classmapping.'cd-object-type',$classmapping.'mv-object-type',$Type)
 			}
-			if($MAdata.projection.'class-mapping'.'cd-object-type'){
-				[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $MAdata.projection.'class-mapping'.'cd-object-type')
-			}
-			if($MAdata.projection.'class-mapping'.'mv-object-type'){
-				[void]$MaOut.AppendFormat("<tr><td>Projektion:{0}</td></tr>`r`n", $MAdata.projection.'class-mapping'.'mv-object-type')
-			}
-			[void]$MaOut.Append("<tr></tr>`r`n")
 		}
 		
 		# DN = dn-construction.attribute
 		#if($dn_construction_xml){
 			#[void]$MaOut.Append()
-			#[void]$MaOut.Append("`r`n")
+			#[void]$MaOut.Append("")
 		#}
 		
 		#Flow Rules
 		$Objectflow = New-Object 'system.collections.generic.dictionary[string,System.Collections.Generic.HashSet[string]]'
+		$FlowFormat = "<tr><th>Flow object</th><th>{0}</th><th>&hArr;</th><th>{1}</th><th></th></tr>"
 		#Import
 		foreach($flow in $MVdata.SelectNodes("/mv-data/import-attribute-flow/import-flow-set/import-flows/import-flow[@src-ma='$ma_guid']")){
 			$rulename = ""
 			
-			$flowName = "<tr><td>Flow object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>`r`n" -f $flow.'cd-object-type',$flow.ParentNode.ParentNode.'mv-object-type'
+			$flowName = $FlowFormat -f $flow.'cd-object-type',$flow.ParentNode.ParentNode.'mv-object-type'
 			$srcattributes=""
 			if($flow.'scripted-mapping'.'src-attribute'){
 				$list=New-Object System.Collections.Generic.HashSet[string]
@@ -354,7 +345,7 @@ function MIM.syncservice.documentation.html {
 				$srcattributes = [string]::Join(",",$list)
 			}
 
-			$flowRule = "<tr><td></td><td>{0}</td><td>&rArr;</td><td><a href='#{1}'>{1}</a></td><td>{2}</td></tr>`r`n" -f $srcattributes,$flow.ParentNode.'mv-attribute',$rulename
+			$flowRule = "<tr><td></td><td>{0}</td><td>&rArr;</td><td><a href='#{1}'>{1}</a></td><td>{2}</td></tr>" -f $srcattributes,$flow.ParentNode.'mv-attribute',$rulename
 
 			if($Objectflow.ContainsKey($flowName)){
 				[void]$Objectflow[$flowName].Add($flowRule)
@@ -371,7 +362,7 @@ function MIM.syncservice.documentation.html {
 		if($MAdata.'export-attribute-flow'){
 			foreach($flowset in $MAdata.'export-attribute-flow'.'export-flow-set'){
 
-				$flowName = "<tr><td>Flow object</td><td>{0}</td><td>&hArr;</td><td>{1}</td></tr>`r`n" -f $flowset.'cd-object-type',$flowset.'mv-object-type'
+				$flowName = $FlowFormat -f $flowset.'cd-object-type',$flowset.'mv-object-type'
 				
 				foreach($flow in $flowset.'export-flow'){
 					$rulename = ""
@@ -444,10 +435,10 @@ function MIM.syncservice.documentation.html {
 
 					if($flow.'suppress-deletions' -eq "false"){ $AllowNull = ",Allow null" } else { $AllowNull="" }
 					$CSatt = $flow.'cd-attribute'
-					$flowRule = "<tr><td></td><td>{0}</td><td>&lArr;</td><td>{1}</td><td>{2}{3}</td></tr>`r`n" -f $CSatt,$srcattributes,$rulename,$AllowNull
+					$flowRule = "<tr><td></td><td>{0}</td><td>&lArr;</td><td>{1}</td><td>{2}{3}</td></tr>" -f $CSatt,$srcattributes,$rulename,$AllowNull
 					
 					foreach($MvAtt in $attlist){
-						$MVstring = "<tr><td></td><td>&rArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>`r`n" -f $ma_name,$CSatt
+						$MVstring = "<tr><td></td><td>({2})&rArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td></td></tr>" -f $ma_name,$CSatt,$flow.ParentNode.'mv-object-type'
 						if($attribute_exportMA.ContainsKey($MvAtt)){
 							[void]$attribute_exportMA[$MvAtt].Add($MVstring)
 						}
@@ -473,48 +464,49 @@ function MIM.syncservice.documentation.html {
 		foreach($key in $Objectflow.Keys){
 			[void]$MaOut.AppendFormat("<tr><td>{0}</td></tr>",$key)
 			[void]$MaOut.Append([string]::Join("",$Objectflow[$key]))
-			[void]$MaOut.Append("<tr></tr>`r`n")
+			[void]$MaOut.Append("<tr></tr>")
 		}
 		
 		
 		#Provisionering object cs ? in 
 		
 		#Deprovisionering object cs
+		[void]$MaOut.Append("<tr><th>Deprovisionering</th><td></td><td></td><td></td><td></td></tr>")
 		if($MAdata){
-			[void]$MaOut.AppendFormat("<tr><td>Deprovisionering:{0}</td></tr><tr><td>enable-recall:{1}</td></tr>`r`n", $MAdata.'provisioning-cleanup'.action, $MVdata.SelectSingleNode("/import-attribute-flow/per-ma-options/ma-options[@ma-id='{$ma_guid}']").'enable-recall')
+			[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>enable-recall:{1}</td><td></td><td></td><td></td></tr>", $MAdata.'provisioning-cleanup'.action, $MVdata.SelectSingleNode("/import-attribute-flow/per-ma-options/ma-options[@ma-id='{$ma_guid}']").'enable-recall')
 		}
 		#CS full list
 		#CS - object - type?
 		#CS - attibutes - type 
-		[void]$MaOut.Append("<tr></tr>`r`n")
+		[void]$MaOut.Append("<tr></tr>")
 		if($MAdata.'attribute-inclusion'){
-			[void]$MaOut.AppendFormat("<tr><th>CS attribute</th></tr>")
+			[void]$MaOut.AppendFormat("<tr><th>CS attribute</th><td></td><td></td><td></td><td></td></tr>")
 			foreach($attribute in $MAdata.'attribute-inclusion'.'attribute'){
-				[void]$MaOut.AppendFormat("<tr><td>{0}</td></tr>",$attribute)
+				[void]$MaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td><td></td></tr>",$attribute)
 			}
 		}
 		
-		[void]$MaOut.Append("</table></br></br>`r`n")
+		[void]$MaOut.Append("</table></br></br>")
 	}
 
 	$schemaOut = New-Object System.Text.StringBuilder
-	[void]$schemaOut.Append("<h1>MV attribute</h1>`r`n")
+	[void]$schemaOut.Append("<h1>MV attribute</h1>")
 
 	write-progress -id 1 -activity "Create html file" -status "Processing MV data" -percentComplete 40
 	$TotalStep = $MVdata.schema.dsml.'directory-schema'.'attribute-type'.Length
 	$StegCount = 0
 	foreach($attribute in $MVdata.schema.dsml.'directory-schema'.'attribute-type'){
 		write-progress -id 2 -activity "Processing attribute" -status ($attribute.Name) -percentComplete ($StegCount/$TotalStep*100)
-		[void]$schemaOut.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td><td></td></tr><tr><td>mulitvalue:{1}</td><td>indexed:{2}</td><td>syntax:{3}</td></tr>`r`n", $attribute.Name,!($attribute.'single-value'), ([Boolean]$attribute.indexed),$OIDTabel[$attribute.syntax])
+		[void]$schemaOut.AppendFormat("<table id='{0}'><tr><th><h1>{0}</h1></th><th></th><th></th><th></th></tr><tr><td>mulitvalue:{1}</td><td>indexed:{2}</td><td>syntax:{3}</td><td></td></tr>", $attribute.Name,!($attribute.'single-value'), ([Boolean]$attribute.indexed),$OIDTabel[$attribute.syntax])
 		
 		$ma=New-Object System.Collections.Generic.HashSet[string]
 		$aname = $attribute.Name
 		$flowss = $MVdata.SelectNodes("/mv-data/import-attribute-flow/import-flow-set/import-flows[@mv-attribute='$aname']")
 		
 		if($flowss){
-			[void]$schemaOut.Append("`r`n")
+			[void]$schemaOut.Append("")
 			foreach($flows in $flowss){
-			[void]$schemaOut.AppendFormat("<tr><td>{0}</td></tr>`r`n",$flows.type)
+			[void]$schemaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td></tr>",$flows.type)
 				$count=1
 				foreach($flow in $flows.'import-flow'){
 
@@ -544,20 +536,20 @@ function MIM.syncservice.documentation.html {
 						$rulename = "constant"
 						$srcattributes = "'"+$flow.'constant-mapping'.'constant-value'+"'"
 					}
-				[void]$schemaOut.AppendFormat("<tr><td>{3}</td><td>&lArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td>{2}</td></tr>`r`n",$MAname,$MA_CS_type,$srcattributes,$count)
+				[void]$schemaOut.AppendFormat("<tr><td>{3}</td><td>({4})&lArr;</td><td><a href='#{0}'>{0}</a>({1})</td><td>{2}</td></tr>",$MAname,$MA_CS_type,$srcattributes,$count,$flows.ParentNode.'mv-object-type')
 				$count++
 				}
 			}
 		}
 
 		if($attribute_exportMA[$aname]){
-			[void]$schemaOut.Append("<tr><td>Export</td></tr>`r`n")
+			[void]$schemaOut.Append("<tr><th>Export</th><th></th><th></th><th></th></tr>")
 			foreach($line in $attribute_exportMA[$aname]){
 				[void]$schemaOut.Append($line)
 			}
 		}
 
-		[void]$schemaOut.Append("</table></br>`r`n")
+		[void]$schemaOut.Append("</table></br>")
 		$StegCount++
 	}
 
@@ -678,15 +670,25 @@ function MIM.service.documentation.html {
 	param
 	(
 		$SelectFilter,
-		[switch]$Debug,
-		[switch]$WriteXMLFIMConfig
+		[switch]$Debug
 	)
 
-	if($WriteXMLFIMConfig){
+	if($Debug){
 		Add-PSSnapin FIMAutomation
 		md ((join-path (pwd) "\xml"))
 	}
 	
+	if(-NOT (Test-Path Lithnet.ResourceManagement.Client.dll))
+	{
+		$FileName = "1.0.6993.23628"
+		Invoke-WebRequest "https://www.nuget.org/api/v2/package/Lithnet.ResourceManagement.Client/$FileName" -OutFile $FileName
+		Add-Type -AssemblyName System.IO.Compression.FileSystem
+		$zip = [System.IO.Compression.ZipFile]::OpenRead((join-path (pwd) $FileName))
+		$zip.Entries|?{$_.FullName.StartsWith("lib/net40/")}|%{[System.IO.Compression.ZipFileExtensions]::ExtractToFile($_, (join-path (pwd) $_.Name), $true)}
+		$zip.Dispose()
+		rm $FileName
+	}
+
 	Add-Type -Path (join-path (pwd) Lithnet.ResourceManagement.Client.dll)
 	$client = new-object Lithnet.ResourceManagement.Client.ResourceManagementClient
 	
@@ -730,13 +732,13 @@ function MIM.service.documentation.html {
 			write-progress -id 2 -activity "ManagementPolicyRule" -status ($MPR.DisplayName+"($MPRguid)") -percentComplete ($StegCount/$TotalStep*100)
 			
 			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$MPRguid, $MPR.DisplayName)
-			if($WriteXMLFIMConfig){
+			if($Debug){
 				$MPRguidString = $MPRguid.Replace("urn:uuid:","")
 				Export-FIMConfig -OnlyBaseResources  -customConfig "/ManagementPolicyRule[ObjectID='$MPRguidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$MPRguidString"))
 				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$MPRguidString")))
 			}
 			[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>","ObjectID",$MPR.ObjectID)
-			foreach($Name in @("Description","ManagementPolicyRuleType","CreatedTime","Creator")){
+			foreach($Name in @("Description","ManagementPolicyRuleType","Disabled","CreatedTime","Creator")){
 				if($MPR.Attributes.ContainsAttribute($Name)){
 					[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>",$Name,$MPR.Attributes.Item($Name).Value)
 				}
@@ -765,8 +767,8 @@ function MIM.service.documentation.html {
 						}
 
 						if($Set -ne $null){
-							$SetToMPR[$SetGuid].Add(("Connected MPR: {0}: <a href='#{1}'>{1}</a>" -f $MPR.DisplayName, $MPRguid))
-							[void]$PortalConfig.AppendFormat("<tr><td><b>SET type {0}: {1}: <a href='#{2}'>{2}</a></b></td></tr>",$Name,$Set.Attributes.Item("DisplayName").Value,$SetGuid)
+							$SetToMPR[$SetGuid].Add(("Connected MPR: <a href='#{1}'>{0}</a>" -f $MPR.DisplayName, $MPRguid))
+							[void]$PortalConfig.AppendFormat("<tr><td><b>SET type {0}: <a href='#{2}'>{1}</a></b></td></tr>",$Name,$Set.Attributes.Item("DisplayName").Value,$SetGuid)
 						}
 					}
 				}
@@ -790,8 +792,8 @@ function MIM.service.documentation.html {
 						}
 
 						if($Workflow -ne $null){
-							$WorkflowToMPR[$WorkflowGuid].Add(("Connected MPR: {0}: <a href='#{1}'>{1}</a>" -f $MPR.DisplayName, $MPRguid))
-							[void]$PortalConfig.AppendFormat("<tr><td><b>Workflow: {0}: <a href='#{1}'>{1}</a></b></td></tr>",$Workflow.Attributes.Item("DisplayName").Value,$WorkflowGuid)
+							$WorkflowToMPR[$WorkflowGuid].Add(("Connected MPR: <a href='#{1}'>{0}</a>" -f $MPR.DisplayName, $MPRguid))
+							[void]$PortalConfig.AppendFormat("<tr><td><b>Workflow: <a href='#{1}'>{0}</a></b></td></tr>",$Workflow.Attributes.Item("DisplayName").Value,$WorkflowGuid)
 						}
 					}
 				}
@@ -804,9 +806,9 @@ function MIM.service.documentation.html {
 		[Void]$PortalConfig.Append("<h1>Set</h1>")
 		foreach($SetGuid in $SetD.Keys){
 			$Set = $SetD[$SetGuid]
-			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr>",$SetGuid,$Set.Attributes.Item("DisplayName").Value)
+			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$SetGuid,$Set.Attributes.Item("DisplayName").Value)
 			
-			if($WriteXMLFIMConfig){
+			if($Debug){
 				$SetGuidString = $SetGuid.Replace("urn:uuid:","")
 				Export-FIMConfig -OnlyBaseResources  -customConfig "/Set[ObjectID='$SetGuidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$SetGuidString"))
 				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$SetGuidString")))
@@ -840,9 +842,9 @@ function MIM.service.documentation.html {
 		[Void]$PortalConfig.Append("<h1>Workflow</h1>")
 		foreach($WorkflowGuid in $WorkflowDefinitionD.Keys){
 			$Workflow = $WorkflowDefinitionD[$WorkflowGuid]
-			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{0}</h1></td></tr>",$WorkflowGuid,$Workflow.Attributes.Item("DisplayName").Value)
+			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$WorkflowGuid,$Workflow.Attributes.Item("DisplayName").Value)
 			
-			if($WriteXMLFIMConfig){
+			if($Debug){
 				$WorkflowGuidString = $WorkflowGuid.Replace("urn:uuid:","")
 				Export-FIMConfig -OnlyBaseResources  -customConfig "/WorkflowDefinition[ObjectID='$WorkflowGuidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$WorkflowGuidString"))
 				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$WorkflowGuidString")))
@@ -869,10 +871,37 @@ function MIM.service.documentation.html {
 	$PortalConfig.ToString()
 }
 
-"<html><head><style>table{border: 1px solid black;}, th, td {}</style></head><body>" | Out-File -Encoding UTF8 -FilePath $OutPutFile
+#"<html><head><style>table{border: 1px solid black;}</style></head><body>" | Out-File -Encoding UTF8 -FilePath $OutPutFile
+"<html><head><style>`
+table{`
+	border: 1px solid black;`
+    font-family: Calibri,Tahoma;`
+    font-size: 10pt;`
+    padding: 0;`
+    border-collapse: collapse;`
+    white-space: pre-wrap;`
+    table-layout: fixed;`
+} `
+th {background: #9CC2E5;} `
+td {border-bottom: 1px solid;}`
+h1 {background: #9CC2E5;}`
+h2 {background: #9CC2E5;}`
+</style></head><body>" | Out-File -Encoding UTF8 -FilePath $OutPutFile
+"<h1>{0}</h1></br>Generated {1}</br>" -f ($env:USERDNSDOMAIN), (get-date).ToString("yyy-MM-dd HH:mm:ss") | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 
-if(-NOT $notservice -AND -NOT $notsyncservice){ "<h2><a href='#ManagementPolicyRule'>Management Policy Rules</a></h2>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notsyncservice){ MIM.syncservice.documentation.html -Debug $Debug | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notservice){ MIM.service.documentation.html -Debug $Debug -SelectFilter $SelectFilter  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+#Get Uninstall info
+$InstallMIMVersions = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "*Identity Manager*Service*"}|%{@{DisplayName = $_.DisplayName;Version = $_.DisplayVersion}}
 
-"</body></html>`r`n" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
+$serviceinstall = $false
+$syncserviceinstall = $false
+foreach($Item in $InstallMIMVersions){
+	if($Item.DisplayName.EndsWith("Service and Portal")){$serviceinstall = $true}
+	if($Item.DisplayName.EndsWith("Synchronization Service")){$syncserviceinstall = $true}
+	
+	"{0} - {1} </br>" -f ($Item.DisplayName), ($Item.Version) | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
+}
+
+if(-NOT $notservice -AND $syncserviceinstall){ "<h2><a href='#ManagementPolicyRule'>Management Policy Rules</a></h2>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notsyncservice -AND $serviceinstall){ MIM.syncservice.documentation.html -Debug:$Debug | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notservice -AND $syncserviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+"</body></html>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
