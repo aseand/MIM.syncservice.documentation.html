@@ -136,7 +136,11 @@ function MIM.syncservice.documentation.html {
 	write-progress -id 1 -activity "Create html file" -status "Initialize" -percentComplete 0
 
 	Add-Type -AssemblyName System.Web
-	Add-Type -Path "C:\Program Files\Microsoft Forefront Identity Manager\2010\Synchronization Service\UIShell\PropertySheetBase.dll"
+	#Add-Type -Path "C:\Program Files\Microsoft Forefront Identity Manager\2010\Synchronization Service\UIShell\PropertySheetBase.dll"
+	$SynchronizationServiceParameters = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\services\FIMSynchronizationService\Parameters
+	Add-Type -Path ($SynchronizationServiceParameters.Path + "\UIShell\PropertySheetBase.dll")
+	
+	
 	$MMSWebService = (new-object Microsoft.DirectoryServices.MetadirectoryServices.UI.WebServices.MMSWebService)
 
 	$CurentDir = (pwd)
@@ -214,6 +218,53 @@ function MIM.syncservice.documentation.html {
 		if(-not $assemblyname){$assemblyname=""}
 
 		[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td><td></td><td></td><td></td></tr>", $assemblyname)
+		
+		#filter stay-disconnector
+		if($MAdata.'stay-disconnector')
+		{
+			[void]$MaOut.AppendFormat("<tr><th>{0}</th><th>{1}</th><th>{2}</th><th>{3}</th><th></th></tr>", "Object disconnector filter","CS attibute","operator","value")
+			foreach($filterset in $MAdata.'stay-disconnector'.'filter-set'){
+			
+				[void]$MaOut.AppendFormat("<tr><th>{0}</th><td></td><td></td><td></td><td></td></tr>", ($filterset.'cd-object-type'))
+				foreach($filteralternative in $filterset.'filter-alternative'){
+						$cdattribute = ""
+						$operator = ""
+						$value = ""
+					foreach($condition in $filteralternative.condition){
+						$cdattribute += $condition.'cd-attribute'+"<br>"
+						$operator += $condition.'operator'+"<br>"
+						$value += $condition.value+"<br>"
+					}
+					[void]$MaOut.AppendFormat("<tr><td></td><td>{0}</td><td>{1}</td><td>{2}</td><td></td></tr>",$cdattribute,$operator,$value)
+				}
+			}
+		}
+		
+		#partition ma-partition-data
+		if($MAdata.'ma-partition-data')
+		{
+			[void]$MaOut.AppendFormat("<tr><th>{0}</th><th>{1}</th><th>{2}</th><th>{3}</th><th></th></tr>", "partition","","","")
+			foreach($partition in $MAdata.'ma-partition-data'.'partition'){
+				if($partition.selected -eq "1"){
+					[void]$MaOut.AppendFormat("<tr><th>{0}</th><td></td><td></td><td></td><td></td></tr>", $partition.name)
+					
+					#inclusions
+					foreach($inclusion in $partition.filter.containers.inclusions.inclusion){
+					
+						[void]$MaOut.AppendFormat("<tr><td></td><td>{0}</td><td>{1}</td><td></td><td></td></tr>","inclusion",($inclusion))
+						
+					}
+
+					#exclusions
+					foreach($exclusions in $partition.filter.containers.exclusions.exclusions){
+					
+						[void]$MaOut.AppendFormat("<tr><td></td><td>{0}</td><td>{1}</td><td></td><td></td></tr>","exclusion",($exclusion))
+						
+					}
+				}
+			}
+		}
+		
 		[void]$MaOut.AppendFormat("<tr><th>Type</th><th>CS</th><th>import/export</th><th>MV</th><th>Rule(s)</th></tr>")
 		
 		#Join object cs - attibute - mv - extension rule name
@@ -264,7 +315,7 @@ function MIM.syncservice.documentation.html {
 					$SyncRuleID = ($classmapping.'sync-rule-id').ToString().ToUpper()
 					$SyncRuleName = $SynchronizationRules[$SyncRuleID]
 					if($SyncRuleName -eq $null){
-						$Type = "<mark>Warning! Missing sync-rule: </mark></br>" + (Format-XML-HTML ("<sync-rule>"+$classmapping.InnerXml+"</sync-rule>"))
+						$Type = "<mark>Warning! Missing sync-rule({0}):</mark></br>{1}"  -f $SyncRuleID, (Format-XML-HTML ("<sync-rule>"+$classmapping.InnerXml+"</sync-rule>"))
 					}else{
 						$Type = "sync-rule(<a href='#{0}'>{1}</a>)" -f $SyncRuleID,$SyncRuleName
 					}
@@ -678,18 +729,18 @@ function MIM.service.documentation.html {
 		md ((join-path (pwd) "\xml"))
 	}
 	
-	if(-NOT (Test-Path Lithnet.ResourceManagement.Client.dll))
+	if(-NOT (Test-Path (join-path ($PSScriptRoot) Lithnet.ResourceManagement.Client.dll)))
 	{
 		$FileName = "1.0.6993.23628"
 		Invoke-WebRequest "https://www.nuget.org/api/v2/package/Lithnet.ResourceManagement.Client/$FileName" -OutFile $FileName
 		Add-Type -AssemblyName System.IO.Compression.FileSystem
-		$zip = [System.IO.Compression.ZipFile]::OpenRead((join-path (pwd) $FileName))
-		$zip.Entries|?{$_.FullName.StartsWith("lib/net40/")}|%{[System.IO.Compression.ZipFileExtensions]::ExtractToFile($_, (join-path (pwd) $_.Name), $true)}
+		$zip = [System.IO.Compression.ZipFile]::OpenRead((join-path ($PSScriptRoot) $FileName))
+		$zip.Entries|?{$_.FullName.StartsWith("lib/net40/")}|%{[System.IO.Compression.ZipFileExtensions]::ExtractToFile($_, (join-path ($PSScriptRoot) $_.Name), $true)}
 		$zip.Dispose()
 		rm $FileName
 	}
 
-	Add-Type -Path (join-path (pwd) Lithnet.ResourceManagement.Client.dll)
+	Add-Type -Path (join-path ($PSScriptRoot) Lithnet.ResourceManagement.Client.dll)
 	$client = new-object Lithnet.ResourceManagement.Client.ResourceManagementClient
 	
 	
@@ -901,7 +952,7 @@ foreach($Item in $InstallMIMVersions){
 	"{0} - {1} </br>" -f ($Item.DisplayName), ($Item.Version) | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 }
 
-if(-NOT $notservice -AND $syncserviceinstall){ "<h2><a href='#ManagementPolicyRule'>Management Policy Rules</a></h2>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notsyncservice -AND $serviceinstall){ MIM.syncservice.documentation.html -Debug:$Debug | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notservice -AND $syncserviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notservice -AND $serviceinstall){ "<h2><a href='#ManagementPolicyRule'>Management Policy Rules</a></h2>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notsyncservice -AND $syncserviceinstall){ MIM.syncservice.documentation.html -Debug:$Debug | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notservice -AND $serviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
 "</body></html>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
