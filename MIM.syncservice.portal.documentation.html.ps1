@@ -2,10 +2,12 @@ param
 (
 	$OutPutFile = (join-path (pwd) ($env:USERDNSDOMAIN+"_attribute_flow.html")),
 	$SelectFilter = "[(starts-with(DisplayName,'CUSTOM'))]",
+	$baseAddress,
 	[switch]$notsyncservice,
 	[switch]$notservice,
 	[switch]$Debug
 )
+if($baseAddress){ $Global:DetectbaseAddress = $baseAddress }
 
 $PasswordRex = new-object System.Text.RegularExpressions.Regex("password=`"([^\\`"]|\\`")*`"",@([System.Text.RegularExpressions.RegexOptions]::Compiled, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase))	
 $OIDTabel = 
@@ -206,6 +208,11 @@ function MIM.syncservice.documentation.html {
 		
 		if($Debug){
 			$MAXmldata.Save((join-path $CurentDir "$ma_name.xml"))
+		}
+		
+		#Detect FIM/MIM Portal config
+		if($ma_type -eq "FIM"){
+			$Global:DetectbaseAddress = $MAdata.'private-configuration'.'fimma-configuration'.'connection-info'.serviceHost
 		}
 		
 		[void]$agentList.Add("$ma_guid",$ma_name)
@@ -721,6 +728,7 @@ function MIM.service.documentation.html {
 	param
 	(
 		$SelectFilter,
+		$baseAddress,
 		[switch]$Debug
 	)
 
@@ -741,11 +749,12 @@ function MIM.service.documentation.html {
 	}
 
 	Add-Type -Path (join-path ($PSScriptRoot) Lithnet.ResourceManagement.Client.dll)
-	$client = new-object Lithnet.ResourceManagement.Client.ResourceManagementClient
+	if($baseAddress){ $client = new-object Lithnet.ResourceManagement.Client.ResourceManagementClient $baseAddress }else{ $client = new-object Lithnet.ResourceManagement.Client.ResourceManagementClient }
+	
 	
 	
 	if($client -ne $null){
-		write-progress -id 1 -activity "PortalConfig" -status "Loading portal config" -percentComplete 70
+		write-progress -id 1 -activity "PortalConfig" -status "Loading portal config $baseAddress" -percentComplete 70
 		
 		write-progress -id 2 -activity "GetResources" -status "/ManagementPolicyRule$SelectFilter" -percentComplete 0
 		$ManagementPolicyRuleD = New-Object 'system.collections.generic.dictionary[string,Object]'
@@ -951,8 +960,15 @@ foreach($Item in $InstallMIMVersions){
 	
 	"{0} - {1} </br>" -f ($Item.DisplayName), ($Item.Version) | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
 }
+$SyncServiceData = if(-NOT $notsyncservice -AND $syncserviceinstall){ MIM.syncservice.documentation.html -Debug:$Debug}
+if($Global:DetectbaseAddress){
+	$serviceinstall = $true
+	"Service and Portal hostadress detected: {0}</br>" -f $Global:DetectbaseAddress | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
+}
 
 if(-NOT $notservice -AND $serviceinstall){ "<h2><a href='#ManagementPolicyRule'>Management Policy Rules</a></h2>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notsyncservice -AND $syncserviceinstall){ MIM.syncservice.documentation.html -Debug:$Debug | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
-if(-NOT $notservice -AND $serviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notsyncservice -AND $syncserviceinstall){ $SyncServiceData | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+
+
+if(-NOT $notservice -AND $serviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter -baseAddress $Global:DetectbaseAddress  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
 "</body></html>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
