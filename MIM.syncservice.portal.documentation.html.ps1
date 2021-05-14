@@ -1,7 +1,6 @@
 param
 (
-	$OutPutFile = (join-path (pwd) ($env:USERDNSDOMAIN+"_attribute_flow.html")),
-	$SelectFilter = "[(starts-with(DisplayName,'CUSTOM'))]",
+	$OutPutFile = (join-path (pwd) ("$($env:USERDNSDOMAIN)_attribute_flow.$((get-date).ToString("yyyyMMdd")).html")),
 	$baseAddress,
 	[switch]$notsyncservice,
 	[switch]$notservice,
@@ -17,6 +16,9 @@ $OIDTabel =
 	"1.3.6.1.4.1.1466.115.121.1.5" = "Binary";
 	"1.3.6.1.4.1.1466.115.121.1.7" = "Bit";
 	"1.3.6.1.4.1.1466.115.121.1.27" = "Integer";
+	"1.2.840.113556.1.4.906" = "Lage Integer";
+	"1.3.6.1.4.1.1466.115.121.1.40" = "Octet String";
+	"1.3.6.1.4.1.1466.115.121.1.24" = "Generalized Time";
 }
 
 function Format-XML-HTML([xml]$xml)
@@ -221,10 +223,22 @@ function MIM.syncservice.documentation.html {
 		[void]$MaOut.AppendFormat("<table id='{0}'><tr><th><h1>{0}</h1></th><th></th><th></th><th></th><th></th></tr><tr><td>Type:{1}</td><td>Capabilities:{2}</td><td>export_type:{3}</td><td>Description:{4}</td><td>GUID:{5}</td></tr>", 
 		$ma_name,$ma_type,$capabilities_mask,$ma_export_type,$ma_description,$ma_guid)
 		
-		$assemblyname = $MAdata.'private-configuration'.MAConfig.'extension-config'.filename.'#text'
-		if(-not $assemblyname){$assemblyname=""}
+		$assemblyname = $MAdata.'private-configuration'.MAConfig.'extension-config'.filename.InnerText
+		if(-not $assemblyname){ $assemblyname = $MAdata.'private-configuration'.MAConfig.'extension-config'.filename}
 
-		[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td><td></td><td></td><td></td></tr>", $assemblyname)
+		if($assemblyname){
+			[void]$MaOut.AppendFormat("<tr><td>extension assembly</td><td>{0}</td><td></td><td></td><td></td></tr>", $assemblyname)
+		}
+		#extension
+		$assemblyname = $Madata.extension.'assembly-name'
+		if($assemblyname){
+			[void]$MaOut.AppendFormat("<tr><td>extension file</td><td>{0}</td><td></td><td></td><td></td></tr>", $assemblyname)
+		}
+
+		
+		#private-configuration
+		#[void]$MaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td><td></td></tr>", "private-configuration")
+		#[void]$MaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td><td></td></tr>", (Format-XML-HTML ($MAdata.'private-configuration'.InnerXml)))
 		
 		#filter stay-disconnector
 		if($MAdata.'stay-disconnector')
@@ -240,7 +254,13 @@ function MIM.syncservice.documentation.html {
 					foreach($condition in $filteralternative.condition){
 						$cdattribute += $condition.'cd-attribute'+"<br>"
 						$operator += $condition.'operator'+"<br>"
-						$value += $condition.value+"<br>"
+
+						if($condition.value.GetType().Name -eq "XmlElement"){ 
+							$value += ([int]$condition.value.InnerText).ToString() 
+						} else { 
+							$value += $condition.value+"<br>" 
+						}
+						 
 					}
 					[void]$MaOut.AppendFormat("<tr><td></td><td>{0}</td><td>{1}</td><td>{2}</td><td></td></tr>",$cdattribute,$operator,$value)
 				}
@@ -272,43 +292,58 @@ function MIM.syncservice.documentation.html {
 			}
 		}
 		
-		[void]$MaOut.AppendFormat("<tr><th>Type</th><th>CS</th><th>import/export</th><th>MV</th><th>Rule(s)</th></tr>")
+		[void]$MaOut.AppendFormat("<tr><th>Type</th><th>CS</th><th>in/out</th><th>MV</th><th></th></tr>")
 		
 		#Join object cs - attibute - mv - extension rule name
 		$OldjoinName = ""
 		if($MAdata.join)
 		{
+			
 			foreach($profile in $MAdata.join.'join-profile'){
-				$count=1
+				#$count = 1
 				foreach($join in $profile.'join-criterion'){
 					$mvobject = $join.search.'mv-object-type'
 					if($mvobject.Length -lt 1){$mvobject = "Any"}
-					$joinName = "{0}{1}" -f $profile.'cd-object-type', $mvobject
-					if($joinName -ne $OldjoinName) { [void]$MaOut.AppendFormat("<tr><th>Join Object</th><th>{0}</th><th>&hArr;</th><th>{1}</th><th></th></tr>",$profile.'cd-object-type',$mvobject) } 
-					$OldjoinName = $joinName
+
+					[void]$MaOut.AppendFormat("<tr><th>Join Group: {0}</th><th>&hArr;</th><th>{1}</th><th>Rule</th><th>Resolution</th></th></tr>",$profile.'cd-object-type',$mvobject)
+
 					
-					$scriptcontext = ""
-					if($join.search.'attribute-mapping'.'direct-mapping' -ne $null){
-						if($join.search.'attribute-mapping'.'direct-mapping'.'src-attribute'.'#text'){
-							$css = [string]::Join(",",$join.search.'attribute-mapping'.'direct-mapping'.'src-attribute'.'#text')
-						}else{
-							$css = [string]::Join(",",$join.search.'attribute-mapping'.'direct-mapping'.'src-attribute')
-						}
-					} else{
-						$scriptcontext = $join.search.'attribute-mapping'.'scripted-mapping'.'script-context'
-						$css = [string]::Join(",",$join.search.'attribute-mapping'.'scripted-mapping'.'src-attribute')
+					$syncruleid = ""
+					if($join.'sync-rule-id'){ 
+						$SyncRuleID = ($join.'sync-rule-id').ToString().ToUpper()
+						$SyncRuleName = $SynchronizationRules[$SyncRuleID]
+						$syncruleid = "(<a href='#{0}'>{1}</a>)" -f $SyncRuleID,$SyncRuleName
 					}
-					[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td>&hArr;</td><td>",$count,$css)
-					$joinS = ""
-					$join.search.'attribute-mapping'.'mv-attribute' | % { [void]$MaOut.AppendFormat("{1}<a href='#{0}'>{0}</a>",$_,$joinS);$joinS="," }
-					[void]$MaOut.AppendFormat("</td><td>{0}</td></tr>",$scriptcontext)
-					$count++
+					
+					$resolutionText = ""
 					foreach($resolution in $join.resolution){
 						if($resolution.'script-context'){
-							#[void]$MaOut.AppendFormat("{0}",$resolution.'script-context')
-							#[void]$MaOut.AppendFormat("{0}",$resolution.'script-context')
+							$resolutionText += $resolution.'script-context'+" "
 						}
 					}
+					
+					foreach($search in $join.search){
+						foreach($attributemapping in $search.'attribute-mapping'){
+						
+							$scriptcontext = $syncruleid
+							if($attributemapping.'direct-mapping' -ne $null){
+								if($attributemapping.'direct-mapping'.'src-attribute'.'#text'){
+									$css = [string]::Join(",",$attributemapping.'direct-mapping'.'src-attribute'.'#text')
+								}else{
+									$css = [string]::Join(",",$attributemapping.'direct-mapping'.'src-attribute')
+								}
+							} else{
+								$scriptcontext = "({0})" -f ($attributemapping.'scripted-mapping'.'script-context')
+								$css = [string]::Join(",",$attributemapping.'scripted-mapping'.'src-attribute')
+							}
+							
+							[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>&hArr;</td><td>",$css)
+							$joinS = ""
+							$attributemapping.'mv-attribute' | % { [void]$MaOut.AppendFormat("{1}<a href='#{0}'>{0}</a>",$_,$joinS);$joinS="," }
+							[void]$MaOut.AppendFormat("</td><td>{0}</td><td>{1}</td></tr>",$scriptcontext,$resolutionText)
+						}
+					}
+					#$count++
 				}
 			}
 		}
@@ -329,7 +364,7 @@ function MIM.syncservice.documentation.html {
 				}else{
 					$Type = $classmapping.type
 				}
-				[void]$MaOut.AppendFormat("<tr><td>Projektion</td><td>{0}</td><td>&hArr;</td><td>{1}</td><td>{2}</td></tr>", $classmapping.'cd-object-type',$classmapping.'mv-object-type',$Type)
+				[void]$MaOut.AppendFormat("<tr><td>Projection</td><td>{0}</td><td>&hArr;</td><td>{1}</td><td>{2}</td></tr>", $classmapping.'cd-object-type',$classmapping.'mv-object-type',$Type)
 			}
 		}
 		
@@ -529,20 +564,67 @@ function MIM.syncservice.documentation.html {
 		#Provisionering object cs ? in 
 		
 		#Deprovisionering object cs
-		[void]$MaOut.Append("<tr><th>Deprovisionering</th><td></td><td></td><td></td><td></td></tr>")
+		[void]$MaOut.Append("<tr><th>Deprovisionering</th><td>enable-recall</td><td></td><td></td><td></td></tr>")
 		if($MAdata){
-			[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>enable-recall:{1}</td><td></td><td></td><td></td></tr>", $MAdata.'provisioning-cleanup'.action, $MVdata.SelectSingleNode("/import-attribute-flow/per-ma-options/ma-options[@ma-id='{$ma_guid}']").'enable-recall')
+			$enablerecall = $MVdata.SelectSingleNode("//per-ma-options/ma-options[@ma-id='$ma_guid']").'enable-recall'
+			[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td></td><td></td><td></td></tr>", $MAdata.'provisioning-cleanup'.action, $enablerecall)
 		}
 		#CS full list
-		#CS - object - type?
+		#CS - object - type
+		$ns = New-Object System.Xml.XmlNamespaceManager($MAXmldata.NameTable)
+		$ns.AddNamespace("dsml","http://www.dsml.org/DSML")
+		
+		$attributeinclusion = New-Object 'system.collections.generic.dictionary[string,Object]'
 		#CS - attibutes - type 
 		[void]$MaOut.Append("<tr></tr>")
 		if($MAdata.'attribute-inclusion'){
-			[void]$MaOut.AppendFormat("<tr><th>CS attribute</th><td></td><td></td><td></td><td></td></tr>")
+			[void]$MaOut.AppendFormat("<tr><th>CS attribute included</th><td>syntax</td><td>mulitvalue</td><td></td><td></td></tr>")
+
 			foreach($attribute in $MAdata.'attribute-inclusion'.'attribute'){
-				[void]$MaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td><td></td></tr>",$attribute)
+				$attributetype = $MAdata.SelectSingleNode("//dsml:dsml/dsml:directory-schema/dsml:attribute-type[dsml:name='$attribute']", $ns)
+				[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td></td><td></td></tr>",$attribute,$OIDTabel[$attributetype.syntax],!($attributetype.'single-value'))
+				$attributeinclusion.Add($attributetype.id,$attributetype)
 			}
 		}
+		#foreach($attribute in $MAdata.'attribute-inclusion'.'attribute'){
+		#	$attributetype = $MAdata.SelectSingleNode("//dsml:dsml/dsml:directory-schema/dsml:attribute-type[dsml:name='$attribute']", $ns)
+		#	$attributeinclusion.Add($attributetype.id,$attributetype)
+		#}
+		
+		[void]$MaOut.Append("<tr></tr>")
+		[void]$MaOut.AppendFormat("<tr><th>CS object(s)</th><td></td><td></td><td></td><td></td></tr>")
+		foreach($Objclass in $MAdata.'ma-partition-data'.partition.'filter-hints'.'object-classes'.'object-class'){
+			if($Objclass.included -eq "1"){
+				$ObjclassName = $Objclass.name
+				$class = $MAdata.SelectSingleNode("//dsml:dsml/dsml:directory-schema/dsml:class[dsml:name='$ObjclassName']", $ns)
+			#foreach($class in $MAdata.'schema'.dsml.'directory-schema'.class){
+				[void]$MaOut.AppendFormat("<tr><th>{0}</th><th>syntax</th><th>mulitvalue</th><th>isAnchor</th><th>required</th></tr>",$class.Name)
+
+				#write-host $class.id
+				foreach($attribute in $class.attribute){
+					$attributename = $attribute.ref.SubString(1)
+					$attributetype = $null
+					if($attributeinclusion.TryGetValue($attributename,[ref]$attributetype)){
+						#$attributetype = $MAdata.SelectSingleNode("//dsml:dsml/dsml:directory-schema/dsml:attribute-type[@id='$attributename']", $ns)
+					
+						#if($attributetype){
+							[void]$MaOut.AppendFormat("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td></tr>",$attributetype.Name,$OIDTabel[$attributetype.syntax],!($attributetype.'single-value'),$attribute.isAnchor,$attribute.required)
+						#}
+					}
+				}
+			}
+		}
+		
+		#ma-run-data run-configuration
+		[void]$MaOut.Append("<tr><th>run-configuration</th><td>step-type</td><td>subtype</td><td></td><td></td></tr>")
+		foreach($configuration in $MAdata.'ma-run-data'.'run-configuration'){
+			[void]$MaOut.AppendFormat("<tr><td>{0}</td><td></td><td></td><td></td><td></td></tr>",$configuration.Name)
+			foreach($step in $configuration.configuration.'step'){
+				[void]$MaOut.AppendFormat("<tr><td></td><td>{0}</td><td>{1}</td><td></td><td></td></tr>",$step.'step-type'.type, $step.'step-type'.'apply-rules-subtype')
+			}
+		}
+
+		
 		
 		[void]$MaOut.Append("</table></br></br>")
 	}
@@ -727,7 +809,8 @@ function MIM.syncservice.documentation.html {
 function MIM.service.documentation.html {
 	param
 	(
-		$SelectFilter,
+		$SelectFilter = "[(starts-with(DisplayName,'CUSTOM'))]",
+		$AttributeSelectFilter = "[(starts-with(DisplayName,'Ext'))]",
 		$baseAddress,
 		[switch]$Debug
 	)
@@ -755,14 +838,32 @@ function MIM.service.documentation.html {
 	
 	if($client -ne $null){
 		write-progress -id 1 -activity "PortalConfig" -status "Loading portal config $baseAddress" -percentComplete 70
+
+		write-progress -id 2 -activity "GetResources" -status "/AttributeTypeDescription$AttributeSelectFilter" -percentComplete 0
+		$AttributeTypeDescriptionD = New-Object 'system.collections.generic.dictionary[string,Object]'
+		$client.GetResources("/AttributeTypeDescription$AttributeSelectFilter")|% { 
+			$AttributeTypeDescriptionD.Add($_.ObjectID,$_)
+		}
 		
-		write-progress -id 2 -activity "GetResources" -status "/ManagementPolicyRule$SelectFilter" -percentComplete 0
+		write-progress -id 2 -activity "GetResources" -status "/BindingDescription$AttributeSelectFilter" -percentComplete 0
+		$BindingDescriptionD = New-Object 'system.collections.generic.dictionary[string,Object]'
+		$client.GetResources("/BindingDescription$AttributeSelectFilter")|% { 
+			$BindingDescriptionD.Add($_.ObjectID,$_)
+		}
+		
+		write-progress -id 2 -activity "GetResources" -status "/ObjectTypeDescription" -percentComplete 0
+		$ObjectTypeDescriptionD = New-Object 'system.collections.generic.dictionary[string,Object]'
+		$client.GetResources("/ObjectTypeDescription")|% { 
+			$ObjectTypeDescriptionD.Add($_.ObjectID,$_)
+		}
+
+		write-progress -id 2 -activity "GetResources" -status "/ManagementPolicyRule$SelectFilter" -percentComplete 10
 		$ManagementPolicyRuleD = New-Object 'system.collections.generic.dictionary[string,Object]'
 		$client.GetResources("/ManagementPolicyRule$SelectFilter")|% { 
 			$ManagementPolicyRuleD.Add($_.ObjectID,$_)
 		}
-
-		write-progress -id 2 -activity "GetResources" -status "/Set$SelectFilter" -percentComplete 33
+		
+		write-progress -id 2 -activity "GetResources" -status "/Set$SelectFilter" -percentComplete 25
 		$SetD = New-Object 'system.collections.generic.dictionary[string,Object]'
 		$SetToMPR = New-Object 'system.collections.generic.dictionary[string,Object]'
 		$client.GetResources("/Set$SelectFilter")|% { 
@@ -770,19 +871,99 @@ function MIM.service.documentation.html {
 			$SetToMPR.Add($_.ObjectID,(new-object System.Collections.Generic.List[string]))
 		}
 
-		write-progress -id 2 -activity "Loading portal config" -status "/WorkflowDefinition$SelectFilter" -percentComplete 66
+		write-progress -id 2 -activity "Loading portal config" -status "/WorkflowDefinition$SelectFilter" -percentComplete 50
 		$WorkflowDefinitionD = New-Object 'system.collections.generic.dictionary[string,Object]'
 		$WorkflowToMPR = New-Object 'system.collections.generic.dictionary[string,Object]'
 		$client.GetResources("/WorkflowDefinition$SelectFilter")|% { 
 			$WorkflowDefinitionD.Add($_.ObjectID,$_)
 			$WorkflowToMPR.Add($_.ObjectID,(new-object System.Collections.Generic.List[string]))
 		}
+		
+		write-progress -id 2 -activity "Loading portal config" -status "/EmailTemplate$SelectFilter" -percentComplete 75
+		$EmailTemplateD = New-Object 'system.collections.generic.dictionary[string,Object]'
+		$client.GetResources("/EmailTemplate$SelectFilter")|% { 
+			$EmailTemplateD.Add($_.ObjectID,$_)
+		}
+		
 		write-progress -id 2 -activity "Loading portal config" -status "Done" -percentComplete 100
 		
 		write-progress -id 1 -activity "PortalConfig" -status "Processing..." -percentComplete 85
 		$PortalConfig = New-Object System.Text.StringBuilder
-		[Void]$PortalConfig.Append("<h1 id='ManagementPolicyRule'>ManagementPolicyRule</h1>")
 		
+		
+		[Void]$PortalConfig.Append("<h1 id='AttributeTypeDescription'>AttributeTypeDescription</h1>")
+		
+		foreach($AttributeTypeguid in $AttributeTypeDescriptionD.Keys){
+			$AttributeType = $AttributeTypeDescriptionD[$AttributeTypeguid]
+
+			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$AttributeTypeguid,$AttributeType.Attributes.Item("DisplayName").Value)
+			
+			if($Debug){
+				$AttributeTypeGuidString = $AttributeType.Replace("urn:uuid:","")
+				Export-FIMConfig -OnlyBaseResources  -customConfig "/AttributeTypeDescription[ObjectID='$AttributeTypeGuidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$AttributeTypeGuidString"))
+				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$AttributeTypeGuidString")))
+			}
+
+			foreach($Name in @("DisplayName","Name","DataType","Multivalued","StringRegex","Description")){
+				if($AttributeType.Attributes.ContainsAttribute($Name)){
+					[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>",$Name,$AttributeType.Attributes.Item($Name).Value)
+				}
+			}
+			[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>","ObjectID",$AttributeType.ObjectID)
+
+			[Void]$PortalConfig.Append("<tr><td></td></tr>")
+			[void]$PortalConfig.Append("</table></br></br>")
+		}
+		
+		[Void]$PortalConfig.Append("<h1 id='BindingDescription'>BindingDescription</h1>")
+		
+		foreach($BindingDescriptionguid in $BindingDescriptionD.Keys){
+			$BindingDescription = $BindingDescriptionD[$BindingDescriptionguid]
+
+			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$BindingDescriptionguid,$BindingDescription.Attributes.Item("DisplayName").Value)
+			
+			if($Debug){
+				$BindingDescriptionGuidString = $BindingDescription.Replace("urn:uuid:","")
+				Export-FIMConfig -OnlyBaseResources  -customConfig "/AttributeTypeDescription[ObjectID='$BindingDescriptionGuidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$BindingDescriptionGuidString"))
+				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$BindingDescriptionGuidString")))
+			}
+
+			foreach($Name in @("DisplayName","Required","StringRegex","Description")){
+				if($BindingDescription.Attributes.ContainsAttribute($Name)){
+					[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>",$Name,$BindingDescription.Attributes.Item($Name).Value)
+				}
+			}
+			foreach($Name in @("BoundAttributeType","BoundObjectType")){
+				if($BindingDescription.Attributes.ContainsAttribute($Name)){
+					if($Name -eq "BoundObjectType"){
+						$ObjectType = $ObjectTypeDescriptionD[$BindingDescription.Attributes.Item($Name).Value]
+						
+						if(-not $ObjectType){
+							$Value = $BindingDescription.Attributes.Item($Name).StringValue
+							$ObjectType = $client.GetResources("/ObjectTypeDescription[ObjectID='$Value']")|%{$_}
+						}
+						$stringvalue = $ObjectType.Attributes.Item("Name").Value
+					}else{
+						$ObjectType = $AttributeTypeDescriptionD[$BindingDescription.Attributes.Item($Name).Value]
+						
+						if(-not $ObjectType){
+							$Value = $BindingDescription.Attributes.Item($Name).StringValue
+							$ObjectType = $client.GetResources("/AttributeTypeDescription[ObjectID='$Value']")|%{$_}
+							$stringvalue = $ObjectType.Attributes.Item("Name").Value
+						}else{
+							$stringvalue = "<a href='#{1}'>{0}</a>" -f $ObjectType.Attributes.Item("Name").Value,$BindingDescription.Attributes.Item($Name).Value
+						}
+					}
+					[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>",$Name,$stringvalue)
+				}
+			}
+			[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>","ObjectID",$BindingDescription.ObjectID)
+
+			[Void]$PortalConfig.Append("<tr><td></td></tr>")
+			[void]$PortalConfig.Append("</table></br></br>")
+		}
+
+		[Void]$PortalConfig.Append("<h1 id='ManagementPolicyRule'>ManagementPolicyRule</h1>")
 		$TotalStep = $ManagementPolicyRuleD.Count
 		$StegCount = 0
 
@@ -926,6 +1107,30 @@ function MIM.service.documentation.html {
 			[Void]$PortalConfig.Append("<tr><td></td></tr>")
 			[void]$PortalConfig.Append("</table></br></br>")
 		}
+		
+		[Void]$PortalConfig.Append("<h1>EmailTemplate</h1>")
+		foreach($EmailTemplateguid in $EmailTemplateD.Keys){
+		
+			$EmailTemplate = $EmailTemplateD[$EmailTemplateguid]
+			
+			[void]$PortalConfig.AppendFormat("<table id='{0}'><tr><td><h1>{1}</h1></td></tr>",$EmailTemplateguid,$EmailTemplate.Attributes.Item("DisplayName").Value)
+			
+			if($Debug){
+				$EmailTemplateGuidString = $EmailTemplate.Replace("urn:uuid:","")
+				Export-FIMConfig -OnlyBaseResources  -customConfig "/EmailTemplate[ObjectID='$EmailTemplateGuidString']" | ConvertFrom-FIMResource -file ((join-path (pwd) "\xml\$EmailTemplateGuidString"))
+				[void]$PortalConfig.AppendFormat("<tr><td><a href='{0}' target='_blank'>xml file</a></td></tr>",((join-path (pwd) "\xml\$EmailTemplateGuidString")))
+			}
+
+			foreach($Name in @("DisplayName","EmailSubject","EmailTemplateType","EmailBody")){
+				if($EmailTemplate.Attributes.ContainsAttribute($Name)){
+					[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>",$Name,$EmailTemplate.Attributes.Item($Name).Value)
+				}
+			}
+			[void]$PortalConfig.AppendFormat("<tr><td>{0}: {1}</td></tr>","ObjectID",$EmailTemplate.ObjectID)
+
+			[Void]$PortalConfig.Append("<tr><td></td></tr>")
+			[void]$PortalConfig.Append("</table></br></br>")
+		}
 	}
 	write-progress -id 1 -activity "Create html file" -status "Write content" -percentComplete 90
 	$PortalConfig.ToString()
@@ -970,5 +1175,5 @@ if(-NOT $notservice -AND $serviceinstall){ "<h2><a href='#ManagementPolicyRule'>
 if(-NOT $notsyncservice -AND $syncserviceinstall){ $SyncServiceData | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
 
 
-if(-NOT $notservice -AND $serviceinstall){ MIM.service.documentation.html -Debug:$Debug -SelectFilter $SelectFilter -baseAddress $Global:DetectbaseAddress  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
+if(-NOT $notservice -AND $serviceinstall){ MIM.service.documentation.html -Debug:$Debug -baseAddress $Global:DetectbaseAddress  | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile }
 "</body></html>" | Out-File -Append -Encoding UTF8 -FilePath $OutPutFile
